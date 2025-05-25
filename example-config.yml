@@ -43,6 +43,13 @@ ai:
   
   # Environment variable containing API key
   api_key_env: OPENAI_API_KEY
+  
+  # Custom base URL for OpenAI-compatible APIs (optional)
+  # Examples:
+  # - Google Gemini: https://generativelanguage.googleapis.com/v1beta/openai/
+  # - Grok: https://api.x.ai/v1
+  # - Azure OpenAI: https://your-resource.openai.azure.com/
+  # base_url: https://api.openai.com/v1
 
 output:
   # Run in dry-run mode by default (recommended)
@@ -60,6 +67,8 @@ providers:
     # Models: gpt-4, gpt-3.5-turbo, etc.
     model: gpt-4
     api_key_env: OPENAI_API_KEY
+    # Custom base URL for OpenAI-compatible APIs (optional)
+    # base_url: https://api.openai.com/v1
     timeout: 30
   
   anthropic:

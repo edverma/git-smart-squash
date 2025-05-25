@@ -60,12 +60,13 @@ class GitSmartSquashCLI:
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
-  git smart-squash                              # Basic usage with defaults
-  git smart-squash --base develop              # Specify base branch
-  git smart-squash --dry-run                   # Show proposed changes only
-  git smart-squash --auto                      # Skip interactive mode
-  git smart-squash --ai-provider local         # Use local AI model
-  git smart-squash --config custom.yml        # Use custom config file
+  git-smart-squash                             # Basic usage with defaults
+  gss                                          # Same as above (short form)
+  git-smart-squash --base develop             # Specify base branch
+  gss --dry-run                               # Show proposed changes only
+  git-smart-squash --auto                     # Skip interactive mode
+  gss --ai-provider local                     # Use local AI model
+  git-smart-squash --config custom.yml       # Use custom config file
             """
         )
         

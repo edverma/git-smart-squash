@@ -18,12 +18,18 @@ class OpenAIProvider:
     def generate_commit_message(self, context: Dict[str, Any]) -> str:
         """Generate a commit message using OpenAI API."""
         try:
-            import openai
-            openai.api_key = self.api_key
+            from openai import OpenAI
+            
+            # Initialize client with custom base URL if provided
+            client_kwargs = {"api_key": self.api_key}
+            if self.config.base_url:
+                client_kwargs["base_url"] = self.config.base_url
+            
+            client = OpenAI(**client_kwargs)
             
             prompt = self._build_prompt(context)
             
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model=self.config.model,
                 messages=[
                     {

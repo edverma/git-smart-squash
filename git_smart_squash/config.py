@@ -68,7 +68,8 @@ class ConfigManager:
                 config.ai = AIConfig(
                     provider=ai_data.get('provider', 'openai'),
                     model=ai_data.get('model', 'gpt-4'),
-                    api_key_env=ai_data.get('api_key_env', 'OPENAI_API_KEY')
+                    api_key_env=ai_data.get('api_key_env', 'OPENAI_API_KEY'),
+                    base_url=ai_data.get('base_url')
                 )
             
             # Load output config
@@ -104,7 +105,8 @@ class ConfigManager:
             'ai': {
                 'provider': config.ai.provider,
                 'model': config.ai.model,
-                'api_key_env': config.ai.api_key_env
+                'api_key_env': config.ai.api_key_env,
+                'base_url': config.ai.base_url
             },
             'output': {
                 'dry_run_default': config.output.dry_run_default,
