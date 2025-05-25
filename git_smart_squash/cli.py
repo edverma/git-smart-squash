@@ -15,7 +15,8 @@ from .config import ConfigManager
 from .analyzer.commit_parser import GitCommitParser
 from .grouping.grouping_engine import GroupingEngine
 from .ai.message_generator import MessageGenerator, TemplateMessageGenerator
-from .git_operations.safety_checks import GitSafetyChecker, RebaseScriptGenerator
+from .git_operations.safety_checks import GitSafetyChecker
+from .git_operations.rebase_executor import RebaseScriptGenerator
 
 
 class GitSmartSquashCLI:

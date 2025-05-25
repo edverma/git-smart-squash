@@ -3,6 +3,7 @@
 from typing import List, Set, Dict
 from ...models import Commit, CommitGroup, GroupingConfig
 from ...analyzer.diff_analyzer import DiffAnalyzer
+from ..utils import extract_scope_from_files
 
 
 class FileOverlapGrouping:
@@ -108,7 +109,7 @@ class FileOverlapGrouping:
             suggested_message = f"{commit_type}: {file_summary}"
         
         # Extract scope from files (e.g., if all files are in src/auth/, scope could be "auth")
-        scope = self._extract_scope_from_files(all_files)
+        scope = extract_scope_from_files(all_files)
         
         return CommitGroup(
             id=group_id,
@@ -122,32 +123,3 @@ class FileOverlapGrouping:
             total_deletions=total_deletions
         )
     
-    def _extract_scope_from_files(self, files: Set[str]) -> str:
-        """Extract a scope from the file paths."""
-        if not files:
-            return ""
-        
-        # Find common directory prefix
-        file_list = list(files)
-        if len(file_list) == 1:
-            # Single file - use directory or component name
-            parts = file_list[0].split('/')
-            if len(parts) > 1:
-                return parts[-2]  # Parent directory
-            return ""
-        
-        # Multiple files - find common prefix
-        common_parts = []
-        first_parts = file_list[0].split('/')
-        
-        for i, part in enumerate(first_parts[:-1]):  # Exclude filename
-            if all(len(f.split('/')) > i and f.split('/')[i] == part for f in file_list):
-                common_parts.append(part)
-            else:
-                break
-        
-        if common_parts:
-            # Use the last common directory as scope
-            return common_parts[-1]
-        
-        return ""

@@ -1,6 +1,6 @@
 """Core data models for Git Smart Squash."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Set
 
@@ -83,13 +83,7 @@ class OutputConfig:
 @dataclass
 class Config:
     """Main configuration object."""
-    grouping: GroupingConfig
-    commit_format: CommitFormatConfig
-    ai: AIConfig
-    output: OutputConfig
-    
-    def __init__(self):
-        self.grouping = GroupingConfig()
-        self.commit_format = CommitFormatConfig()
-        self.ai = AIConfig()
-        self.output = OutputConfig()
+    grouping: GroupingConfig = field(default_factory=GroupingConfig)
+    commit_format: CommitFormatConfig = field(default_factory=CommitFormatConfig)
+    ai: AIConfig = field(default_factory=AIConfig)
+    output: OutputConfig = field(default_factory=OutputConfig)

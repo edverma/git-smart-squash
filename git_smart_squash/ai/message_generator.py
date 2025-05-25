@@ -2,6 +2,7 @@
 
 from typing import Optional
 from ..models import CommitGroup, AIConfig
+from ..utils.message import validate_and_format_message
 from .providers.openai import OpenAIProvider
 from .providers.anthropic import AnthropicProvider
 from .providers.local import LocalProvider
@@ -35,7 +36,7 @@ class MessageGenerator:
             message = self.provider.generate_commit_message(context)
             
             # Validate and format the message
-            return self._validate_and_format(message)
+            return validate_and_format_message(message)
             
         except Exception as e:
             # Fallback to the basic suggested message
@@ -98,58 +99,6 @@ class MessageGenerator:
             days = total_minutes / 1440
             return f"{days:.1f} days"
     
-    def _validate_and_format(self, message: str) -> str:
-        """Validate and format the generated message."""
-        if not message:
-            return "chore: Update files"
-        
-        # Clean up the message
-        message = message.strip()
-        
-        # Ensure it's not too long (conventional commit guidelines suggest 50 chars for subject)
-        lines = message.split('\n')
-        subject = lines[0]
-        
-        if len(subject) > 72:  # Reasonable max length
-            # Try to truncate at word boundary
-            words = subject.split()
-            truncated = []
-            current_length = 0
-            
-            for word in words:
-                if current_length + len(word) + 1 > 69:  # Leave room for "..."
-                    break
-                truncated.append(word)
-                current_length += len(word) + 1
-            
-            if truncated:
-                subject = ' '.join(truncated) + "..."
-            else:
-                subject = subject[:69] + "..."
-        
-        # Ensure it follows conventional commit format (type: description)
-        if ':' not in subject:
-            # Try to prepend a type if it doesn't have one
-            if any(subject.lower().startswith(t) for t in ['add', 'implement', 'create']):
-                subject = f"feat: {subject}"
-            elif any(subject.lower().startswith(t) for t in ['fix', 'resolve', 'correct']):
-                subject = f"fix: {subject}"
-            elif any(subject.lower().startswith(t) for t in ['update', 'modify', 'change']):
-                subject = f"refactor: {subject}"
-            elif any(subject.lower().startswith(t) for t in ['remove', 'delete']):
-                subject = f"refactor: {subject}"
-            elif any(subject.lower().startswith(t) for t in ['test', 'spec']):
-                subject = f"test: {subject}"
-            elif any(subject.lower().startswith(t) for t in ['doc', 'readme']):
-                subject = f"docs: {subject}"
-            else:
-                subject = f"chore: {subject}"
-        
-        # Rebuild message
-        if len(lines) > 1:
-            return subject + '\n' + '\n'.join(lines[1:])
-        else:
-            return subject
 
 
 class TemplateMessageGenerator:

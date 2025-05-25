@@ -93,95 +93,22 @@ class GroupingEngine:
         
         return deduplicated
     
-    def _merge_groups(self, groups: List[CommitGroup]) -> CommitGroup:
-        """Merge multiple groups into a single group."""
-        if len(groups) == 1:
-            return groups[0]
-        
-        # Collect all unique commits
-        all_commits = []
-        seen_hashes = set()
-        for group in groups:
-            for commit in group.commits:
-                if commit.hash not in seen_hashes:
-                    all_commits.append(commit)
-                    seen_hashes.add(commit.hash)
-        
-        # Sort by timestamp
-        all_commits.sort(key=lambda c: c.timestamp)
-        
-        # Combine metadata
-        all_files = set()
-        total_insertions = 0
-        total_deletions = 0
-        
-        for commit in all_commits:
-            all_files.update(commit.files)
-            total_insertions += commit.insertions
-            total_deletions += commit.deletions
-        
-        # Determine the best rationale and type
-        best_group = self._select_best_group(groups)
-        
-        # Create merged group ID
-        group_ids = [g.id for g in groups]
-        merged_id = f"merged_{'_'.join(group_ids[:3])}"  # Limit length
-        
-        # Combine rationales
-        rationales = [g.rationale for g in groups]
-        combined_rationale = f"multiple_strategies: {'; '.join(set(rationales))}"
-        
-        return CommitGroup(
-            id=merged_id,
-            commits=all_commits,
-            rationale=combined_rationale,
-            suggested_message=best_group.suggested_message,
-            commit_type=best_group.commit_type,
-            scope=best_group.scope,
-            files_touched=all_files,
-            total_insertions=total_insertions,
-            total_deletions=total_deletions
-        )
     
     def _select_best_group(self, groups: List[CommitGroup]) -> CommitGroup:
         """Select the best group from overlapping groups based on quality metrics."""
-        # Scoring criteria:
-        # 1. Dependency groups are preferred (more logical)
-        # 2. File overlap groups are next (concrete relationship)
-        # 3. Semantic groups (content-based)
-        # 4. Temporal groups (least reliable)
+        if len(groups) == 1:
+            return groups[0]
         
-        strategy_scores = {
-            'dependency': 4,
-            'file_overlap': 3,
-            'semantic': 2,
-            'temporal': 1
-        }
+        # Priority order: dependency > file_overlap > semantic > temporal
+        strategy_priority = ['dependency', 'file_overlap', 'semantic', 'temporal']
         
-        best_group = groups[0]
-        best_score = 0
-        
-        for group in groups:
-            score = 0
-            
-            # Strategy preference
-            for strategy, strategy_score in strategy_scores.items():
+        for strategy in strategy_priority:
+            for group in groups:
                 if strategy in group.rationale:
-                    score += strategy_score
-                    break
-            
-            # Size bonus (larger groups often indicate better grouping)
-            score += len(group.commits) * 0.1
-            
-            # Message quality bonus
-            if len(group.suggested_message) > 10 and ':' in group.suggested_message:
-                score += 0.5
-            
-            if score > best_score:
-                best_score = score
-                best_group = group
+                    return group
         
-        return best_group
+        # Fallback to the group with most commits
+        return max(groups, key=lambda g: len(g.commits))
     
     def _find_ungrouped_commits(self, all_commits: List[Commit], groups: List[CommitGroup]) -> List[Commit]:
         """Find commits that are not part of any group."""

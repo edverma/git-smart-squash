@@ -5,6 +5,7 @@ from datetime import timedelta
 from ...models import Commit, CommitGroup, GroupingConfig
 from ...analyzer.metadata_extractor import MetadataExtractor
 from ...analyzer.diff_analyzer import DiffAnalyzer
+from ..utils import extract_scope_from_files
 
 
 class TemporalGrouping:
@@ -82,7 +83,7 @@ class TemporalGrouping:
             suggested_message = f"{primary_type}: Batch update ({len(commits)} commits)"
         
         # Extract scope from files
-        scope = self._extract_scope_from_files(all_files)
+        scope = extract_scope_from_files(all_files)
         
         return CommitGroup(
             id=group_id,
@@ -96,29 +97,3 @@ class TemporalGrouping:
             total_deletions=total_deletions
         )
     
-    def _extract_scope_from_files(self, files: set) -> str:
-        """Extract a scope from the file paths."""
-        if not files:
-            return ""
-        
-        file_list = list(files)
-        if len(file_list) == 1:
-            parts = file_list[0].split('/')
-            if len(parts) > 1:
-                return parts[-2]
-            return ""
-        
-        # Find common directory prefix
-        common_parts = []
-        first_parts = file_list[0].split('/')
-        
-        for i, part in enumerate(first_parts[:-1]):
-            if all(len(f.split('/')) > i and f.split('/')[i] == part for f in file_list):
-                common_parts.append(part)
-            else:
-                break
-        
-        if common_parts:
-            return common_parts[-1]
-        
-        return ""
