@@ -15,12 +15,12 @@ with open('requirements.txt') as f:
 setup(
     name="git-smart-squash",
     version="0.1.0",
-    author="Git Smart Squash Team",
-    author_email="dev@example.com",
+    author="Your Name",
+    author_email="your.email@example.com",
     description="Automatically reorganize messy git commit histories into clean, semantic commits",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/example/git-smart-squash",
+    url="https://github.com/yourusername/git-smart-squash",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -55,8 +55,8 @@ setup(
     },
     keywords="git, commit, squash, rebase, conventional-commits, ai",
     project_urls={
-        "Bug Reports": "https://github.com/example/git-smart-squash/issues",
-        "Source": "https://github.com/example/git-smart-squash",
-        "Documentation": "https://github.com/example/git-smart-squash#readme",
+        "Bug Reports": "https://github.com/yourusername/git-smart-squash/issues",
+        "Source": "https://github.com/yourusername/git-smart-squash",
+        "Documentation": "https://github.com/yourusername/git-smart-squash#readme",
     },
 )
