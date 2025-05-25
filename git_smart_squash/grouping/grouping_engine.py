@@ -52,8 +52,8 @@ class GroupingEngine:
             dependency_groups = self.dependency_grouping.group_commits(commits)
             all_groups.extend(dependency_groups)
         
-        # Merge overlapping groups and resolve conflicts
-        merged_groups = self._merge_overlapping_groups(all_groups)
+        # Deduplicate groups that contain the same commits
+        merged_groups = self._deduplicate_groups(all_groups)
         
         # Ensure all commits are accounted for
         ungrouped_commits = self._find_ungrouped_commits(commits, merged_groups)
@@ -68,41 +68,30 @@ class GroupingEngine:
         
         return merged_groups
     
-    def _merge_overlapping_groups(self, groups: List[CommitGroup]) -> List[CommitGroup]:
-        """Merge groups that have overlapping commits."""
+    def _deduplicate_groups(self, groups: List[CommitGroup]) -> List[CommitGroup]:
+        """Remove duplicate groups and select the best one for each set of commits."""
         if not groups:
             return []
         
-        # Build a mapping from commit hash to groups
-        commit_to_groups = {}
+        # Group by commit signature (set of commit hashes)
+        signature_to_groups = {}
         for group in groups:
-            for commit in group.commits:
-                if commit.hash not in commit_to_groups:
-                    commit_to_groups[commit.hash] = []
-                commit_to_groups[commit.hash].append(group)
+            signature = frozenset(commit.hash for commit in group.commits)
+            if signature not in signature_to_groups:
+                signature_to_groups[signature] = []
+            signature_to_groups[signature].append(group)
         
-        # Find groups that share commits
-        merged = []
-        processed_groups = set()
+        # Select the best group for each signature
+        deduplicated = []
+        for signature, candidate_groups in signature_to_groups.items():
+            if len(candidate_groups) == 1:
+                deduplicated.append(candidate_groups[0])
+            else:
+                # Select the best group using existing logic
+                best_group = self._select_best_group(candidate_groups)
+                deduplicated.append(best_group)
         
-        for group in groups:
-            if id(group) in processed_groups:
-                continue
-            
-            # Find all groups that share commits with this group
-            overlapping_groups = {group}
-            for commit in group.commits:
-                overlapping_groups.update(commit_to_groups[commit.hash])
-            
-            # Mark all overlapping groups as processed
-            for overlapping_group in overlapping_groups:
-                processed_groups.add(id(overlapping_group))
-            
-            # Merge the overlapping groups
-            merged_group = self._merge_groups(list(overlapping_groups))
-            merged.append(merged_group)
-        
-        return merged
+        return deduplicated
     
     def _merge_groups(self, groups: List[CommitGroup]) -> CommitGroup:
         """Merge multiple groups into a single group."""
