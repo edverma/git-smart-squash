@@ -340,9 +340,9 @@ Examples:
             backup = safety_checker.create_backup_branch()
             self.console.print(f"[green]Created backup branch: {backup}[/green]")
         
-        # TODO: Implement actual rebase execution
-        self.console.print("[yellow]Actual execution not yet implemented in MVP[/yellow]")
-        self.console.print("Use --dry-run to generate a script for manual execution")
+        # For MVP, we generate scripts instead of direct execution
+        self.console.print("[yellow]Direct execution will be implemented in future versions[/yellow]")
+        self.console.print("For now, use --dry-run to generate a safe execution script")
     
     def handle_config_command(self, args):
         """Handle config subcommand."""
