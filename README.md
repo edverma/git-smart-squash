@@ -34,6 +34,11 @@ Git Smart Squash is a command-line tool that uses AI and heuristics to intellige
 pip install git-smart-squash
 ```
 
+### Requirements
+
+- Python 3.8+
+- Git 2.0+
+
 ### Development Installation
 
 ```bash
