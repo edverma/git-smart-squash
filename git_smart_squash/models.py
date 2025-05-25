@@ -3,6 +3,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Set
+from .constants import (
+    DEFAULT_TIME_WINDOW,
+    DEFAULT_SIMILARITY_THRESHOLD,
+    DEFAULT_COMMIT_TYPES,
+    MAX_SUBJECT_LENGTH
+)
 
 
 @dataclass
@@ -46,9 +52,9 @@ class RebaseOperation:
 @dataclass
 class GroupingConfig:
     """Configuration for commit grouping strategies."""
-    time_window: int = 1800  # seconds
+    time_window: int = DEFAULT_TIME_WINDOW
     min_file_overlap: int = 1  # minimum shared files
-    similarity_threshold: float = 0.7  # for semantic matching
+    similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD
 
 
 @dataclass
@@ -56,12 +62,12 @@ class CommitFormatConfig:
     """Configuration for commit message formatting."""
     types: List[str] = None
     scope_required: bool = False
-    max_subject_length: int = 50
+    max_subject_length: int = MAX_SUBJECT_LENGTH
     body_required: bool = False
     
     def __post_init__(self):
         if self.types is None:
-            self.types = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore']
+            self.types = DEFAULT_COMMIT_TYPES
 
 
 @dataclass

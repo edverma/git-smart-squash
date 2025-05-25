@@ -8,19 +8,23 @@ this_directory = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
+# Read version from VERSION file
+with open(os.path.join(this_directory, 'git_smart_squash', 'VERSION')) as f:
+    version = f.read().strip()
+
 # Read requirements
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
 setup(
     name="git-smart-squash",
-    version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    version=version,
+    author="Evan Verma",
+    author_email="edverma@icloud.com",
     description="Automatically reorganize messy git commit histories into clean, semantic commits",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/git-smart-squash",
+    url="https://github.com/edverma/git-smart-squash",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -56,8 +60,8 @@ setup(
     },
     keywords="git, commit, squash, rebase, conventional-commits, ai",
     project_urls={
-        "Bug Reports": "https://github.com/yourusername/git-smart-squash/issues",
-        "Source": "https://github.com/yourusername/git-smart-squash",
-        "Documentation": "https://github.com/yourusername/git-smart-squash#readme",
+        "Bug Reports": "https://github.com/edverma/git-smart-squash/issues",
+        "Source": "https://github.com/edverma/git-smart-squash",
+        "Documentation": "https://github.com/edverma/git-smart-squash#readme",
     },
 )

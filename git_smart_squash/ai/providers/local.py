@@ -2,39 +2,46 @@
 
 import subprocess
 import json
-from typing import Dict, Any
-from ...models import AIConfig
+from typing import Dict, Any, Optional
+from ...models import AIConfig, CommitGroup
+from ..base import BaseAIProvider
 
 
-class LocalProvider:
+class LocalProvider(BaseAIProvider):
     """Local AI model provider for generating commit messages."""
     
     def __init__(self, config: AIConfig):
+        model_name = config.model or "codellama:7b"
+        super().__init__(model_name)
         self.config = config
-        self.model_name = config.model or "codellama:7b"
+        self.model_name = model_name
     
-    def generate_commit_message(self, context: Dict[str, Any]) -> str:
+    def generate_commit_message(self, group: CommitGroup) -> Optional[str]:
         """Generate a commit message using a local AI model (via Ollama)."""
         try:
-            prompt = self._build_prompt(context)
+            prompt = self._build_prompt(group)
             
             # Try Ollama first
             try:
-                return self._generate_with_ollama(prompt)
+                message = self._generate_with_ollama(prompt)
+                if message and self._validate_message(message):
+                    return message
             except Exception:
                 pass
             
             # Fallback to other local options
             try:
-                return self._generate_with_llamacpp(prompt)
+                message = self._generate_with_llamacpp(prompt)
+                if message and self._validate_message(message):
+                    return message
             except Exception:
                 pass
             
             # Final fallback
-            return context.get('suggested_message', 'chore: Update files')
+            return None
             
         except Exception:
-            return context.get('suggested_message', 'chore: Update files')
+            return None
     
     def _generate_with_ollama(self, prompt: str) -> str:
         """Generate using Ollama."""
@@ -99,26 +106,3 @@ class LocalProvider:
             pass
         
         raise Exception("llama.cpp generation failed")
-    
-    def _build_prompt(self, context: Dict[str, Any]) -> str:
-        """Build a prompt optimized for local models."""
-        # Simpler, more direct prompt for local models
-        prompt_parts = [
-            f"Write a conventional git commit message for {context['commit_count']} commits.",
-            f"Type: {context['commit_type']}",
-            f"Files: {', '.join(context['files_touched'][:3])}",
-            "Messages:"
-        ]
-        
-        # Add only first 2 original messages to keep it short
-        for i, msg in enumerate(context['original_messages'][:2]):
-            prompt_parts.append(f"- {msg}")
-        
-        prompt_parts.extend([
-            "",
-            "Format: type(scope): description",
-            "Keep it under 50 characters.",
-            "Commit message:"
-        ])
-        
-        return "\n".join(prompt_parts)

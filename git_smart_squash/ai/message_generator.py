@@ -29,14 +29,15 @@ class MessageGenerator:
     def generate_message(self, group: CommitGroup) -> str:
         """Generate a commit message for a group of commits."""
         try:
-            # Build context for the AI
-            context = self._build_context(group)
-            
             # Generate message using the provider
-            message = self.provider.generate_commit_message(context)
+            message = self.provider.generate_commit_message(group)
             
-            # Validate and format the message
-            return validate_and_format_message(message)
+            if message:
+                # Validate and format the message
+                return validate_and_format_message(message)
+            else:
+                # Provider returned None, use fallback
+                return group.suggested_message
             
         except Exception as e:
             # Fallback to the basic suggested message

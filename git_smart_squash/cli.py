@@ -162,87 +162,30 @@ Examples:
     
     def run_smart_squash(self, args):
         """Run the main smart squash operation."""
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=self.console
-        ) as progress:
+        # Perform safety checks
+        safety_checker = GitSafetyChecker()
+        if not self._perform_safety_checks(safety_checker, args.auto):
+            return
             
-            # Safety checks
-            task = progress.add_task("Performing safety checks...", total=None)
-            safety_checker = GitSafetyChecker()
-            warnings = safety_checker.perform_safety_checks()
+        # Parse commits
+        commits = self._parse_commits(args.base)
+        if not commits:
+            return
             
-            if warnings:
-                self.console.print("\n[yellow]Warnings detected:[/yellow]")
-                for warning in warnings:
-                    self.console.print(f"  ⚠️  {warning}")
-                
-                if not args.auto:
-                    response = input("\nContinue anyway? (y/N): ")
-                    if response.lower() != 'y':
-                        self.console.print("Operation cancelled.")
-                        return
+        # Group commits
+        groups = self._group_commits(commits, args.strategies)
+        if not groups:
+            self.console.print("[yellow]No grouping opportunities found[/yellow]")
+            return
             
-            # Parse commits
-            progress.update(task, description="Parsing commits...")
-            parser = GitCommitParser()
-            
-            try:
-                base_branch = args.base
-                # Try to detect default base branch if 'main' doesn't exist
-                if base_branch == 'main':
-                    base_branch = parser.get_default_base_branch()
-                
-                commits = parser.get_commits_between(base_branch)
-                
-                if not commits:
-                    self.console.print(f"[yellow]No commits found between {base_branch} and HEAD[/yellow]")
-                    return
-                
-                self.console.print(f"Found {len(commits)} commits to analyze")
-                
-            except Exception as e:
-                self.console.print(f"[red]Failed to parse commits: {e}[/red]")
-                return
-            
-            # Group commits
-            progress.update(task, description="Grouping commits...")
-            grouping_engine = GroupingEngine(self.config.grouping)
-            strategies = args.strategies or ['file_overlap', 'temporal', 'semantic', 'dependency']
-            groups = grouping_engine.group_commits(commits, strategies)
-            
-            if not groups:
-                self.console.print("[yellow]No grouping opportunities found[/yellow]")
-                return
-            
-            # Generate messages
-            if args.no_ai:
-                progress.update(task, description="Generating template messages...")
-                message_generator = TemplateMessageGenerator()
-                for group in groups:
-                    group.suggested_message = message_generator.generate_message(group)
-            else:
-                try:
-                    progress.update(task, description="Generating AI messages...")
-                    message_generator = MessageGenerator(self.config.ai)
-                    for group in groups:
-                        if len(group.commits) > 1:  # Only generate for multi-commit groups
-                            ai_message = message_generator.generate_message(group)
-                            if ai_message:
-                                group.suggested_message = ai_message
-                except Exception as e:
-                    self.console.print(f"[yellow]AI generation failed ({e}), using templates[/yellow]")
-                    template_generator = TemplateMessageGenerator()
-                    for group in groups:
-                        group.suggested_message = template_generator.generate_message(group)
-            
-            progress.stop()
+        # Generate messages
+        groups = self._generate_messages(groups, args.no_ai)
         
         # Display results
         self.display_grouping_results(groups, commits)
         
         # Show analysis
+        grouping_engine = GroupingEngine(self.config.grouping)
         quality_analysis = grouping_engine.analyze_grouping_quality(groups)
         self.display_quality_analysis(quality_analysis)
         
@@ -385,6 +328,96 @@ Examples:
             self.console.print(f"\n[blue]📊 {len(commits)} commits ahead of {base_branch}[/blue]")
         except Exception as e:
             self.console.print(f"[yellow]Could not analyze commits: {e}[/yellow]")
+    
+    def _perform_safety_checks(self, safety_checker: GitSafetyChecker, auto: bool) -> bool:
+        """Perform safety checks and handle warnings."""
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console
+        ) as progress:
+            task = progress.add_task("Performing safety checks...", total=None)
+            warnings = safety_checker.perform_safety_checks()
+            
+        if warnings:
+            self.console.print("\n[yellow]Warnings detected:[/yellow]")
+            for warning in warnings:
+                self.console.print(f"  ⚠️  {warning}")
+            
+            if not auto:
+                response = input("\nContinue anyway? (y/N): ")
+                if response.lower() != 'y':
+                    self.console.print("Operation cancelled.")
+                    return False
+        return True
+    
+    def _parse_commits(self, base_branch: str):
+        """Parse commits between base branch and HEAD."""
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console
+        ) as progress:
+            task = progress.add_task("Parsing commits...", total=None)
+            parser = GitCommitParser()
+            
+            try:
+                # Try to detect default base branch if 'main' doesn't exist
+                if base_branch == 'main':
+                    base_branch = parser.get_default_base_branch()
+                
+                commits = parser.get_commits_between(base_branch)
+                
+                if not commits:
+                    self.console.print(f"[yellow]No commits found between {base_branch} and HEAD[/yellow]")
+                    return None
+                
+                self.console.print(f"Found {len(commits)} commits to analyze")
+                return commits
+                
+            except Exception as e:
+                self.console.print(f"[red]Failed to parse commits: {e}[/red]")
+                return None
+    
+    def _group_commits(self, commits, strategies):
+        """Group commits using specified strategies."""
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console
+        ) as progress:
+            task = progress.add_task("Grouping commits...", total=None)
+            grouping_engine = GroupingEngine(self.config.grouping)
+            strategies = strategies or ['file_overlap', 'temporal', 'semantic', 'dependency']
+            return grouping_engine.group_commits(commits, strategies)
+    
+    def _generate_messages(self, groups, no_ai: bool):
+        """Generate commit messages for groups."""
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console
+        ) as progress:
+            if no_ai:
+                task = progress.add_task("Generating template messages...", total=None)
+                message_generator = TemplateMessageGenerator()
+                for group in groups:
+                    group.suggested_message = message_generator.generate_message(group)
+            else:
+                try:
+                    task = progress.add_task("Generating AI messages...", total=None)
+                    message_generator = MessageGenerator(self.config.ai)
+                    for group in groups:
+                        if len(group.commits) > 1:  # Only generate for multi-commit groups
+                            ai_message = message_generator.generate_message(group)
+                            if ai_message:
+                                group.suggested_message = ai_message
+                except Exception as e:
+                    self.console.print(f"[yellow]AI generation failed ({e}), using templates[/yellow]")
+                    template_generator = TemplateMessageGenerator()
+                    for group in groups:
+                        group.suggested_message = template_generator.generate_message(group)
+        return groups
 
 
 def main():

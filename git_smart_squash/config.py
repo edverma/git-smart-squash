@@ -4,6 +4,14 @@ import os
 import yaml
 from typing import Optional, Dict, Any
 from .models import Config, GroupingConfig, CommitFormatConfig, AIConfig, OutputConfig
+from .constants import (
+    DEFAULT_TIME_WINDOW,
+    DEFAULT_SIMILARITY_THRESHOLD,
+    MIN_SIMILARITY_THRESHOLD,
+    MAX_SIMILARITY_THRESHOLD,
+    DEFAULT_COMMIT_TYPES,
+    MAX_SUBJECT_LENGTH
+)
 
 
 class ConfigManager:
@@ -47,18 +55,18 @@ class ConfigManager:
             if 'grouping' in data:
                 grouping_data = data['grouping']
                 config.grouping = GroupingConfig(
-                    time_window=grouping_data.get('time_window', 1800),
+                    time_window=grouping_data.get('time_window', DEFAULT_TIME_WINDOW),
                     min_file_overlap=grouping_data.get('min_file_overlap', 1),
-                    similarity_threshold=grouping_data.get('similarity_threshold', 0.7)
+                    similarity_threshold=grouping_data.get('similarity_threshold', DEFAULT_SIMILARITY_THRESHOLD)
                 )
             
             # Load commit format config
             if 'commit_format' in data:
                 format_data = data['commit_format']
                 config.commit_format = CommitFormatConfig(
-                    types=format_data.get('types', ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore']),
+                    types=format_data.get('types', DEFAULT_COMMIT_TYPES),
                     scope_required=format_data.get('scope_required', False),
-                    max_subject_length=format_data.get('max_subject_length', 50),
+                    max_subject_length=format_data.get('max_subject_length', MAX_SUBJECT_LENGTH),
                     body_required=format_data.get('body_required', False)
                 )
             
@@ -135,8 +143,8 @@ class ConfigManager:
         if config.grouping.min_file_overlap < 0:
             errors.append("grouping.min_file_overlap must be non-negative")
         
-        if not 0 <= config.grouping.similarity_threshold <= 1:
-            errors.append("grouping.similarity_threshold must be between 0 and 1")
+        if not MIN_SIMILARITY_THRESHOLD <= config.grouping.similarity_threshold <= MAX_SIMILARITY_THRESHOLD:
+            errors.append(f"grouping.similarity_threshold must be between {MIN_SIMILARITY_THRESHOLD} and {MAX_SIMILARITY_THRESHOLD}")
         
         # Validate commit format config
         if not config.commit_format.types:
