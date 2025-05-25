@@ -1,0 +1,124 @@
+"""Local AI provider for commit message generation."""
+
+import subprocess
+import json
+from typing import Dict, Any
+from ...models import AIConfig
+
+
+class LocalProvider:
+    """Local AI model provider for generating commit messages."""
+    
+    def __init__(self, config: AIConfig):
+        self.config = config
+        self.model_name = config.model or "codellama:7b"
+    
+    def generate_commit_message(self, context: Dict[str, Any]) -> str:
+        """Generate a commit message using a local AI model (via Ollama)."""
+        try:
+            prompt = self._build_prompt(context)
+            
+            # Try Ollama first
+            try:
+                return self._generate_with_ollama(prompt)
+            except Exception:
+                pass
+            
+            # Fallback to other local options
+            try:
+                return self._generate_with_llamacpp(prompt)
+            except Exception:
+                pass
+            
+            # Final fallback
+            return context.get('suggested_message', 'chore: Update files')
+            
+        except Exception:
+            return context.get('suggested_message', 'chore: Update files')
+    
+    def _generate_with_ollama(self, prompt: str) -> str:
+        """Generate using Ollama."""
+        try:
+            cmd = ["ollama", "generate", self.model_name]
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            stdout, stderr = process.communicate(input=prompt, timeout=30)
+            
+            if process.returncode == 0 and stdout.strip():
+                # Extract just the commit message from the response
+                lines = stdout.strip().split('\n')
+                # Look for a line that looks like a commit message
+                for line in lines:
+                    line = line.strip()
+                    if ':' in line and len(line) < 100:
+                        return line
+                # Fallback to first non-empty line
+                return lines[0] if lines else ""
+            
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        
+        raise Exception("Ollama generation failed")
+    
+    def _generate_with_llamacpp(self, prompt: str) -> str:
+        """Generate using llama.cpp server."""
+        try:
+            import requests
+            
+            # Assume llama.cpp server running on default port
+            response = requests.post(
+                "http://localhost:8080/completion",
+                json={
+                    "prompt": prompt,
+                    "n_predict": 50,
+                    "temperature": 0.3,
+                    "stop": ["\n\n"]
+                },
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get('content', '').strip()
+                if content:
+                    # Extract commit message
+                    lines = content.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if ':' in line and len(line) < 100:
+                            return line
+                    return lines[0] if lines else ""
+            
+        except (ImportError, Exception):
+            pass
+        
+        raise Exception("llama.cpp generation failed")
+    
+    def _build_prompt(self, context: Dict[str, Any]) -> str:
+        """Build a prompt optimized for local models."""
+        # Simpler, more direct prompt for local models
+        prompt_parts = [
+            f"Write a conventional git commit message for {context['commit_count']} commits.",
+            f"Type: {context['commit_type']}",
+            f"Files: {', '.join(context['files_touched'][:3])}",
+            "Messages:"
+        ]
+        
+        # Add only first 2 original messages to keep it short
+        for i, msg in enumerate(context['original_messages'][:2]):
+            prompt_parts.append(f"- {msg}")
+        
+        prompt_parts.extend([
+            "",
+            "Format: type(scope): description",
+            "Keep it under 50 characters.",
+            "Commit message:"
+        ])
+        
+        return "\n".join(prompt_parts)

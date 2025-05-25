@@ -1,0 +1,109 @@
+# Git Smart Squash Configuration Example
+# Copy to .git-smart-squash.yml and customize for your project
+
+grouping:
+  # Time window in seconds for temporal grouping (default: 1800 = 30 minutes)
+  time_window: 1800
+  
+  # Minimum number of shared files for file-based grouping (default: 1)
+  min_file_overlap: 1
+  
+  # Similarity threshold for semantic grouping (0.0 to 1.0, default: 0.7)
+  similarity_threshold: 0.7
+
+commit_format:
+  # Allowed commit types (conventional commits)
+  types:
+    - feat      # New features
+    - fix       # Bug fixes
+    - docs      # Documentation changes
+    - style     # Code style/formatting
+    - refactor  # Code refactoring
+    - test      # Adding or updating tests
+    - chore     # Maintenance tasks
+    - perf      # Performance improvements
+    - ci        # CI/CD changes
+    - build     # Build system changes
+  
+  # Whether scope is required in commit messages
+  scope_required: false
+  
+  # Maximum length for commit subject line
+  max_subject_length: 50
+  
+  # Whether commit body is required
+  body_required: false
+
+ai:
+  # AI provider: openai, anthropic, or local
+  provider: openai
+  
+  # Model to use (provider-specific)
+  model: gpt-4
+  
+  # Environment variable containing API key
+  api_key_env: OPENAI_API_KEY
+
+output:
+  # Run in dry-run mode by default (recommended)
+  dry_run_default: true
+  
+  # Create backup branch before operations
+  backup_branch: true
+  
+  # Protect against force pushes to shared branches
+  force_push_protection: true
+
+# Provider-specific configurations
+providers:
+  openai:
+    # Models: gpt-4, gpt-3.5-turbo, etc.
+    model: gpt-4
+    api_key_env: OPENAI_API_KEY
+    timeout: 30
+  
+  anthropic:
+    # Models: claude-3-sonnet-20240229, claude-3-haiku-20240307, etc.
+    model: claude-3-sonnet-20240229
+    api_key_env: ANTHROPIC_API_KEY
+    timeout: 30
+  
+  local:
+    # For Ollama: codellama, mistral, etc.
+    # For llama.cpp: specify model path or server endpoint
+    model: codellama:7b
+    endpoint: http://localhost:8080  # For llama.cpp server
+    timeout: 60
+
+# Project-specific settings
+project:
+  # Exclude certain file patterns from analysis
+  exclude_patterns:
+    - "*.log"
+    - "*.tmp"
+    - "node_modules/**"
+    - ".git/**"
+  
+  # Custom commit type mappings based on file patterns
+  file_type_mappings:
+    "test/**": test
+    "docs/**": docs
+    "*.md": docs
+    "*.yml": ci
+    "*.yaml": ci
+    "Dockerfile": ci
+
+# Advanced grouping settings
+advanced:
+  # Maximum commits per group (prevents overly large groups)
+  max_commits_per_group: 10
+  
+  # Minimum commits to form a group (1 = allow single commit groups)
+  min_commits_per_group: 1
+  
+  # Weight factors for different grouping strategies (0.0 to 1.0)
+  strategy_weights:
+    file_overlap: 0.4
+    temporal: 0.3
+    semantic: 0.2
+    dependency: 0.1
