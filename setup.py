@@ -12,9 +12,14 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 with open(os.path.join(this_directory, 'git_smart_squash', 'VERSION')) as f:
     version = f.read().strip()
 
-# Read requirements
-with open('requirements.txt') as f:
-    requirements = f.read().splitlines()
+# Define requirements directly
+requirements = [
+    "pyyaml>=6.0",
+    "rich>=13.0.0", 
+    "openai>=1.0.0",
+    "anthropic>=0.3.0",
+    "requests>=2.28.0",
+]
 
 setup(
     name="git-smart-squash",
@@ -26,6 +31,10 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/edverma/git-smart-squash",
     packages=find_packages(),
+    include_package_data=True,
+    package_data={
+        'git_smart_squash': ['VERSION'],
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
