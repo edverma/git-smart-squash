@@ -70,7 +70,7 @@ class ReleaseManager:
     
     def check_prerequisites(self) -> bool:
         """Check that required tools are available."""
-        required_tools = ['git', 'pip']
+        required_tools = ['git']
         
         # Check for Python (try multiple variants)
         python_found = False
@@ -81,6 +81,17 @@ class ReleaseManager:
         
         if not python_found:
             Logger.error("Python not found in PATH")
+            return False
+        
+        # Check for pip (try multiple variants)
+        pip_found = False
+        for pip_cmd in ['pip', 'pip3']:
+            if shutil.which(pip_cmd):
+                pip_found = True
+                break
+        
+        if not pip_found:
+            Logger.error("Required tool 'pip' or 'pip3' not found in PATH")
             return False
         
         for tool in required_tools:
