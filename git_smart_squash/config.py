@@ -93,8 +93,8 @@ class ConfigManager:
             if 'ai' in data:
                 ai_data = data['ai']
                 config.ai = AIConfig(
-                    provider=ai_data.get('provider', 'openai'),
-                    model=ai_data.get('model', 'gpt-4'),
+                    provider=ai_data.get('provider', 'local'),
+                    model=ai_data.get('model', 'devstral'),
                     api_key_env=ai_data.get('api_key_env', 'OPENAI_API_KEY'),
                     base_url=ai_data.get('base_url')
                 )

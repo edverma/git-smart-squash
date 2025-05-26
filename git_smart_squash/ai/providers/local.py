@@ -44,32 +44,72 @@ class LocalProvider(BaseAIProvider):
             return None
     
     def _generate_with_ollama(self, prompt: str) -> str:
-        """Generate using Ollama."""
+        """Generate using Ollama API."""
         try:
-            cmd = ["ollama", "generate", self.model_name]
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+            import requests
+            
+            # Use Ollama API
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 100,
+                        "stop": ["\n\n", "---", "```"]
+                    }
+                },
+                timeout=30
             )
             
-            stdout, stderr = process.communicate(input=prompt, timeout=30)
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get('response', '').strip()
+                if content:
+                    # Extract just the commit message from the response
+                    lines = content.split('\n')
+                    # Look for a line that looks like a commit message
+                    for line in lines:
+                        line = line.strip()
+                        if ':' in line and len(line) < 100 and not line.startswith('#'):
+                            return line
+                    # Fallback to first non-empty line that's not a comment
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('#') and len(line) < 100:
+                            return line
+                    return lines[0] if lines else ""
             
-            if process.returncode == 0 and stdout.strip():
-                # Extract just the commit message from the response
-                lines = stdout.strip().split('\n')
-                # Look for a line that looks like a commit message
-                for line in lines:
-                    line = line.strip()
-                    if ':' in line and len(line) < 100:
-                        return line
-                # Fallback to first non-empty line
-                return lines[0] if lines else ""
-            
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+        except (ImportError, Exception) as e:
+            # Fallback to CLI if API fails
+            try:
+                cmd = ["ollama", "run", self.model_name, prompt]
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    # Extract just the commit message from the response
+                    lines = result.stdout.strip().split('\n')
+                    # Look for a line that looks like a commit message
+                    for line in lines:
+                        line = line.strip()
+                        if ':' in line and len(line) < 100 and not line.startswith('#'):
+                            return line
+                    # Fallback to first non-empty line
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('#') and len(line) < 100:
+                            return line
+                    return lines[0] if lines else ""
+                
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
         
         raise Exception("Ollama generation failed")
     

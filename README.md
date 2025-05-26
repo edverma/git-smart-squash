@@ -69,8 +69,8 @@ git smart-squash --base develop
 # Dry run to see proposed changes
 git smart-squash --dry-run
 
-# Use local AI model instead of cloud APIs
-git smart-squash --ai-provider local --model codellama
+# Use cloud AI instead of default local model
+git smart-squash --ai-provider openai --model gpt-4
 
 # Skip AI and use template-based messages
 git smart-squash --no-ai
@@ -123,8 +123,8 @@ commit_format:
   max_subject_length: 50
 
 ai:
-  provider: openai  # or anthropic, local
-  model: gpt-4
+  provider: local  # or openai, anthropic
+  model: devstral
   api_key_env: OPENAI_API_KEY
 
 output:
@@ -147,14 +147,17 @@ export ANTHROPIC_API_KEY="your-api-key"
 git smart-squash --ai-provider anthropic --model claude-3-sonnet-20240229
 ```
 
-### Local Models (Ollama)
+### Local Models (Ollama) - Default
 ```bash
 # Install and start Ollama
 ollama serve
-ollama pull codellama
+ollama pull devstral
 
-# Use with git-smart-squash
-git smart-squash --ai-provider local --model codellama
+# Use with git-smart-squash (default configuration)
+git smart-squash
+
+# Or specify explicitly
+git smart-squash --ai-provider local --model devstral
 ```
 
 ## Examples

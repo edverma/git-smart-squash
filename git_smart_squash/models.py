@@ -73,8 +73,8 @@ class CommitFormatConfig:
 @dataclass
 class AIConfig:
     """Configuration for AI providers."""
-    provider: str = "openai"  # or anthropic, local
-    model: str = "gpt-4"
+    provider: str = "local"  # or openai, anthropic
+    model: str = "devstral"
     api_key_env: str = "OPENAI_API_KEY"
     base_url: Optional[str] = None  # Custom base URL for OpenAI-compatible APIs
 
