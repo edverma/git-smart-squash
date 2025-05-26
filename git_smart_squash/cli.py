@@ -33,6 +33,9 @@ class GitSmartSquashCLI:
         args = parser.parse_args()
         
         try:
+            # Auto-create global config if none exists
+            self._ensure_global_config()
+            
             # Load configuration
             self.config = self.config_manager.load_config(args.config)
             
@@ -51,6 +54,21 @@ class GitSmartSquashCLI:
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
             sys.exit(1)
+    
+    def _ensure_global_config(self):
+        """Ensure a global config file exists, create one if not."""
+        try:
+            # Check if any global config already exists
+            for path in self.config_manager.GLOBAL_CONFIG_PATHS:
+                if os.path.exists(path):
+                    return  # Config already exists
+            
+            # Create default global config silently
+            self.config_manager.create_global_config()
+            
+        except Exception:
+            # Don't fail if config creation fails, just continue
+            pass
     
     def create_parser(self) -> argparse.ArgumentParser:
         """Create the argument parser."""

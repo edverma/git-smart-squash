@@ -85,6 +85,10 @@ Git Smart Squash supports multiple configuration levels with the following prece
 3. **Global user config** (`~/.git-smart-squash.yml` or `~/.config/git-smart-squash/config.yml`)
 4. **Default settings**
 
+### Automatic Configuration
+
+A default global configuration file is automatically created at `~/.git-smart-squash.yml` when you first run the tool. This provides sensible defaults that work out of the box.
+
 ### Local Configuration
 
 Create a `.git-smart-squash.yml` file in your repository for project-specific settings:
@@ -96,14 +100,14 @@ git-smart-squash config --init
 
 ### Global Configuration
 
-Create a global configuration that applies to all repositories:
+The global configuration is created automatically on first use. You can also create or update it manually:
 
 ```bash
-# Generate a global config file
+# Create/update global config file
 git-smart-squash config --init-global
 ```
 
-This creates `~/.git-smart-squash.yml` with default settings that apply across all your repositories.
+This creates or updates `~/.git-smart-squash.yml` with default settings that apply across all your repositories.
 
 ### Configuration Options
 

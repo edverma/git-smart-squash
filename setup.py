@@ -1,7 +1,10 @@
 """Setup script for Git Smart Squash."""
 
 from setuptools import setup, find_packages
+from setuptools.command.install import install
 import os
+import subprocess
+import sys
 
 # Read the contents of README file
 this_directory = os.path.abspath(os.path.dirname(__file__))
@@ -20,6 +23,19 @@ requirements = [
     "anthropic>=0.3.0",
     "requests>=2.28.0",
 ]
+
+
+class PostInstallCommand(install):
+    """Custom post-installation command."""
+    
+    def run(self):
+        install.run(self)
+        # Run post-install script to create default global config
+        try:
+            subprocess.check_call([sys.executable, "-c", 
+                "from git_smart_squash.post_install import main; main()"])
+        except Exception as e:
+            print(f"Warning: Post-install setup failed: {e}", file=sys.stderr)
 
 setup(
     name="git-smart-squash",
@@ -66,6 +82,9 @@ setup(
             "git-smart-squash=git_smart_squash.cli:main",
             "gss=git_smart_squash.cli:main",
         ],
+    },
+    cmdclass={
+        'install': PostInstallCommand,
     },
     keywords="git, commit, squash, rebase, conventional-commits, ai",
     project_urls={
