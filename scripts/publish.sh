@@ -51,7 +51,7 @@ check_git_status() {
 }
 
 get_current_version() {
-    python -c "import sys; sys.path.insert(0, '$PROJECT_ROOT'); from git_smart_squash import __version__; print(__version__)"
+    python3 -c "import sys; sys.path.insert(0, '$PROJECT_ROOT'); from git_smart_squash import __version__; print(__version__)"
 }
 
 validate_version() {
@@ -82,7 +82,7 @@ update_version() {
 run_tests() {
     log_info "Running tests..."
     cd "$PROJECT_ROOT"
-    python -m pytest -xvs
+    python3 -m pytest -xvs
     log_success "All tests passed"
 }
 
@@ -94,7 +94,7 @@ build_package() {
     rm -rf dist/ build/ *.egg-info/
     
     # Build source and wheel distributions
-    python setup.py sdist bdist_wheel
+    python3 setup.py sdist bdist_wheel
     
     log_success "Package built successfully"
 }
@@ -108,7 +108,7 @@ publish_to_pypi() {
         log_success "Published to TestPyPI"
         
         log_info "Testing installation from TestPyPI..."
-        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "$PACKAGE_NAME" --upgrade --force-reinstall
+        pip3 install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "$PACKAGE_NAME" --upgrade --force-reinstall
         log_success "TestPyPI installation successful"
     else
         log_info "Publishing to PyPI..."
@@ -160,11 +160,11 @@ generate_homebrew_formula() {
     rm -f "$temp_file"
     
     # Get dependency hashes from PyPI
-    local pyyaml_sha=$(curl -s https://pypi.org/pypi/PyYAML/json | python -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['6.0.2'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
-    local rich_sha=$(curl -s https://pypi.org/pypi/rich/json | python -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['14.0.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
-    local openai_sha=$(curl -s https://pypi.org/pypi/openai/json | python -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['1.44.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
-    local anthropic_sha=$(curl -s https://pypi.org/pypi/anthropic/json | python -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['0.52.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
-    local requests_sha=$(curl -s https://pypi.org/pypi/requests/json | python -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['2.31.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
+    local pyyaml_sha=$(curl -s https://pypi.org/pypi/PyYAML/json | python3 -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['6.0.2'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
+    local rich_sha=$(curl -s https://pypi.org/pypi/rich/json | python3 -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['14.0.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
+    local openai_sha=$(curl -s https://pypi.org/pypi/openai/json | python3 -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['1.44.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
+    local anthropic_sha=$(curl -s https://pypi.org/pypi/anthropic/json | python3 -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['0.52.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
+    local requests_sha=$(curl -s https://pypi.org/pypi/requests/json | python3 -c "import sys, json; data=json.load(sys.stdin); print([f for f in data['releases']['2.31.0'] if f['filename'].endswith('.tar.gz')][0]['digests']['sha256'])")
     
     cat > "$formula_file" << EOF
 class GitSmartSquash < Formula
@@ -487,9 +487,9 @@ main() {
     
     # Prerequisites check
     log_info "Checking prerequisites..."
-    check_command python
+    check_command python3
     check_command git
-    check_command pip
+    check_command pip3
     
     if [[ "$test_only" == "false" && "$pypi_only" == "false" ]]; then
         check_command curl
