@@ -127,7 +127,7 @@ class TestConfigManager:
         config = Config()
         config.grouping.similarity_threshold = 1.5
         
-        with pytest.raises(ValueError, match="similarity_threshold must be between 0 and 1"):
+        with pytest.raises(ValueError, match="similarity_threshold must be between 0.5 and 0.95"):
             self.config_manager.validate_config(config)
     
     def test_validate_config_invalid_provider(self):
