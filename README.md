@@ -78,7 +78,34 @@ git smart-squash --no-ai
 
 ## Configuration
 
-Create a `.git-smart-squash.yml` file in your repository:
+Git Smart Squash supports multiple configuration levels with the following precedence:
+
+1. **Explicit config** (`--config path/to/config.yml`)
+2. **Local repository config** (`.git-smart-squash.yml` in current directory)
+3. **Global user config** (`~/.git-smart-squash.yml` or `~/.config/git-smart-squash/config.yml`)
+4. **Default settings**
+
+### Local Configuration
+
+Create a `.git-smart-squash.yml` file in your repository for project-specific settings:
+
+```bash
+# Generate a local config file
+git-smart-squash config --init
+```
+
+### Global Configuration
+
+Create a global configuration that applies to all repositories:
+
+```bash
+# Generate a global config file
+git-smart-squash config --init-global
+```
+
+This creates `~/.git-smart-squash.yml` with default settings that apply across all your repositories.
+
+### Configuration Options
 
 ```yaml
 grouping:

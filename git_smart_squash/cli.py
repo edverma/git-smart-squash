@@ -137,6 +137,7 @@ Examples:
         # Config command
         config_parser = subparsers.add_parser('config', help='Configuration management')
         config_parser.add_argument('--init', action='store_true', help='Create default config file')
+        config_parser.add_argument('--init-global', action='store_true', help='Create global config file')
         config_parser.add_argument('--show', action='store_true', help='Show current configuration')
         config_parser.set_defaults(func=self.handle_config_command)
         
@@ -294,6 +295,10 @@ Examples:
         if args.init:
             config_path = self.config_manager.create_default_config()
             self.console.print(f"[green]Created default configuration: {config_path}[/green]")
+        
+        elif args.init_global:
+            config_path = self.config_manager.create_global_config()
+            self.console.print(f"[green]Created global configuration: {config_path}[/green]")
         
         elif args.show:
             if self.config:

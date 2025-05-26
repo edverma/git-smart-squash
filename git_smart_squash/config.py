@@ -24,19 +24,38 @@ class ConfigManager:
         "git-smart-squash.yaml"
     ]
     
+    GLOBAL_CONFIG_PATHS = [
+        os.path.expanduser("~/.git-smart-squash.yml"),
+        os.path.expanduser("~/.git-smart-squash.yaml"),
+        os.path.expanduser("~/.config/git-smart-squash/config.yml"),
+        os.path.expanduser("~/.config/git-smart-squash/config.yaml")
+    ]
+    
     def __init__(self):
         self.config = Config()
     
     def load_config(self, config_path: Optional[str] = None) -> Config:
-        """Load configuration from file or use defaults."""
+        """Load configuration from file or use defaults.
+        
+        Configuration precedence (highest to lowest):
+        1. Explicitly specified config file (--config)
+        2. Local repository config files
+        3. Global user config files
+        4. Default configuration
+        """
         if config_path:
             if os.path.exists(config_path):
                 return self._load_from_file(config_path)
             else:
                 raise FileNotFoundError(f"Config file not found: {config_path}")
         
-        # Try default locations
+        # Try local repository config files first
         for path in self.DEFAULT_CONFIG_PATHS:
+            if os.path.exists(path):
+                return self._load_from_file(path)
+        
+        # Try global config files
+        for path in self.GLOBAL_CONFIG_PATHS:
             if os.path.exists(path):
                 return self._load_from_file(path)
         
@@ -128,6 +147,20 @@ class ConfigManager:
     
     def create_default_config(self, config_path: str = ".git-smart-squash.yml"):
         """Create a default configuration file."""
+        config = Config()
+        self.save_config(config, config_path)
+        return config_path
+    
+    def create_global_config(self, config_path: Optional[str] = None):
+        """Create a global configuration file."""
+        if config_path is None:
+            config_path = os.path.expanduser("~/.git-smart-squash.yml")
+        
+        # Create directory if it doesn't exist
+        config_dir = os.path.dirname(config_path)
+        if config_dir and not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+        
         config = Config()
         self.save_config(config, config_path)
         return config_path
