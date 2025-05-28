@@ -27,7 +27,7 @@ class FileOverlapGrouping:
         # Convert to CommitGroup objects
         groups = []
         for i, group_commits in enumerate(commit_groups):
-            if len(group_commits) >= 1:  # Only create groups with at least 1 commit
+            if len(group_commits) > 1:  # Only create groups with multiple commits
                 group = self._create_commit_group(f"file_group_{i}", group_commits, "file_overlap")
                 groups.append(group)
         
@@ -63,9 +63,9 @@ class FileOverlapGrouping:
                 if file_path in file_to_commits:
                     for related_commit in file_to_commits[file_path]:
                         if related_commit.hash not in visited:
-                            # Check if there's sufficient file overlap
-                            overlap = self.diff_analyzer.calculate_file_overlap(commit, related_commit)
-                            if overlap >= (self.config.min_file_overlap / max(len(commit.files), len(related_commit.files), 1)):
+                            # Check if there's sufficient file overlap (absolute count)
+                            shared_files = set(commit.files) & set(related_commit.files)
+                            if len(shared_files) >= self.config.min_file_overlap:
                                 dfs(related_commit, component)
         
         for commit in commits:
