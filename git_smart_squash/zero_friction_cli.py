@@ -145,7 +145,7 @@ class ZeroFrictionCLI:
                 
             # Generate messages
             print_colored(f"\n🤖 Generating commit messages...", "blue")
-            msg_generator = MessageGenerator(config.ai, config.commit_format)
+            msg_generator = MessageGenerator(config.ai)
             
             for group in groups:
                 group.suggested_message = msg_generator.generate_message(group)
