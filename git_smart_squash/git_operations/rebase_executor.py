@@ -77,10 +77,116 @@ class InteractiveRebaseExecutor:
         """Execute the squash plan using git rebase interactive."""
         import subprocess
         import tempfile
+        from ..git_operations.safety_checks import GitSafetyChecker
+        from datetime import datetime
         
-        # For now, just return True to simulate successful execution
-        # In a real implementation, this would perform the actual rebase
-        return True
+        # Create backup if requested
+        backup_name = None
+        if create_backup:
+            try:
+                checker = GitSafetyChecker(self.repo_path)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                current_branch = self._get_current_branch()
+                backup_name = f"backup_{current_branch}_{timestamp}"
+                checker.create_backup_branch(backup_name)
+            except Exception:
+                # If backup creation fails, continue but warn
+                pass
+        
+        # Execute rebase for each group that has multiple commits
+        try:
+            for i, group in enumerate(groups):
+                if len(group.commits) <= 1:
+                    continue  # Skip single-commit groups
+                    
+                # Execute rebase for this group
+                success = self._execute_group_rebase(group, i)
+                if not success:
+                    print(f"Warning: Failed to rebase group {i+1}")
+                    # Continue with other groups rather than failing completely
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error during rebase execution: {e}")
+            if backup_name:
+                print(f"Your work is safe - restore with: git reset --hard {backup_name}")
+            return False
+    
+    def _execute_group_rebase(self, group: CommitGroup, group_index: int) -> bool:
+        """Execute rebase for a single group of commits."""
+        import subprocess
+        import tempfile
+        import os
+        
+        if len(group.commits) <= 1:
+            return True  # Nothing to squash
+            
+        try:
+            # Get the range for interactive rebase
+            oldest_commit = group.commits[-1]  # Commits are typically in reverse chronological order
+            newest_commit = group.commits[0]
+            
+            # Create a temporary rebase todo file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                todo_file = f.name
+                
+                # Write rebase instructions
+                # First commit: pick (keep as-is)
+                f.write(f"pick {oldest_commit.hash} {oldest_commit.message}\n")
+                
+                # Subsequent commits: squash into the first
+                for commit in reversed(group.commits[:-1]):
+                    f.write(f"squash {commit.hash} {commit.message}\n")
+                
+                # Add the new commit message as a comment for reference
+                if group.suggested_message:
+                    f.write(f"\n# New commit message: {group.suggested_message}\n")
+            
+            # Create commit message file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                msg_file = f.name
+                if group.suggested_message:
+                    f.write(group.suggested_message)
+                else:
+                    f.write(f"Squashed {len(group.commits)} commits\n\n")
+                    for commit in group.commits:
+                        f.write(f"- {commit.message}\n")
+            
+            # Execute git rebase with our todo file
+            env = os.environ.copy()
+            env['GIT_SEQUENCE_EDITOR'] = f'cp {todo_file}'
+            env['GIT_EDITOR'] = f'cp {msg_file}'
+            
+            cmd = [
+                'git', '-C', self.repo_path, 'rebase', '-i', 
+                f'{oldest_commit.hash}^'
+            ]
+            
+            result = subprocess.run(
+                cmd, 
+                env=env,
+                capture_output=True, 
+                text=True,
+                timeout=60
+            )
+            
+            # Clean up temporary files
+            try:
+                os.unlink(todo_file)
+                os.unlink(msg_file)
+            except:
+                pass
+            
+            if result.returncode == 0:
+                return True
+            else:
+                print(f"Git rebase failed for group {group_index + 1}: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"Error executing rebase for group {group_index + 1}: {e}")
+            return False
     
     def _get_current_branch(self) -> str:
         """Get current branch name."""

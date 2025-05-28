@@ -49,12 +49,13 @@ class TestGroupingEngine:
     
     def test_group_commits_empty_list(self):
         """Test grouping with empty commit list."""
-        groups = self.engine.group_commits([])
+        groups, warnings = self.engine.group_commits([])
         assert groups == []
+        assert warnings == []
     
     def test_group_commits_single_strategy(self):
         """Test grouping with a single strategy."""
-        groups = self.engine.group_commits(self.commits, strategies=['file_overlap'])
+        groups, warnings = self.engine.group_commits(self.commits, strategies=['file_overlap'])
         
         # Should find at least one group
         assert len(groups) > 0
@@ -65,7 +66,7 @@ class TestGroupingEngine:
     
     def test_group_commits_multiple_strategies(self):
         """Test grouping with multiple strategies."""
-        groups = self.engine.group_commits(
+        groups, warnings = self.engine.group_commits(
             self.commits, 
             strategies=['file_overlap', 'temporal']
         )
@@ -104,16 +105,22 @@ class TestGroupingEngine:
         
         merged = self.engine._deduplicate_groups([group1, group2])
         
-        # Should keep both groups since they have different commit sets
-        assert len(merged) == 2
+        # Should keep only one group since they overlap (both contain commit2)
+        # The higher-scored group should be kept
+        assert len(merged) == 1
         
-        # Both groups should be preserved since they don't have identical commit sets
-        group_signatures = [frozenset(c.hash for c in g.commits) for g in merged]
-        expected_signatures = [
-            frozenset(["commit1", "commit2"]),
-            frozenset(["commit2", "commit4"])
-        ]
-        assert all(sig in expected_signatures for sig in group_signatures)
+        # The remaining group should be one of the two original groups
+        remaining_group = merged[0]
+        assert remaining_group.id in ["group1", "group2"]
+        
+        # All commits from both groups should be accounted for in ungrouped logic
+        all_original_commits = set()
+        for group in [group1, group2]:
+            for commit in group.commits:
+                all_original_commits.add(commit.hash)
+        
+        remaining_commits = set(c.hash for c in remaining_group.commits)
+        assert remaining_commits.issubset(all_original_commits)
     
     def test_find_ungrouped_commits(self):
         """Test finding commits not in any group."""
@@ -136,7 +143,7 @@ class TestGroupingEngine:
     
     def test_analyze_grouping_quality(self):
         """Test grouping quality analysis."""
-        groups = self.engine.group_commits(self.commits)
+        groups, warnings = self.engine.group_commits(self.commits)
         analysis = self.engine.analyze_grouping_quality(groups)
         
         # Debug: print groups to understand what's happening

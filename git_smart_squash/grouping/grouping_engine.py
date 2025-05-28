@@ -80,29 +80,28 @@ class GroupingEngine:
         return merged_groups, warnings
     
     def _deduplicate_groups(self, groups: List[CommitGroup]) -> List[CommitGroup]:
-        """Remove duplicate groups and select the best one for each set of commits."""
+        """Remove duplicate and overlapping groups, keeping the best ones."""
         if not groups:
             return []
         
-        # Group by commit signature (set of commit hashes)
-        signature_to_groups = {}
-        for group in groups:
-            signature = frozenset(commit.hash for commit in group.commits)
-            if signature not in signature_to_groups:
-                signature_to_groups[signature] = []
-            signature_to_groups[signature].append(group)
+        # Sort groups by quality score (best first)
+        sorted_groups = sorted(groups, key=self._score_group, reverse=True)
         
-        # Select the best group for each signature
-        deduplicated = []
-        for signature, candidate_groups in signature_to_groups.items():
-            if len(candidate_groups) == 1:
-                deduplicated.append(candidate_groups[0])
-            else:
-                # Select the best group using existing logic
-                best_group = self._select_best_group(candidate_groups)
-                deduplicated.append(best_group)
+        final_groups = []
+        used_commits = set()
         
-        return deduplicated
+        for group in sorted_groups:
+            group_commits = set(c.hash for c in group.commits)
+            
+            # Skip if any commit in this group is already used
+            if group_commits & used_commits:
+                continue
+                
+            # Add this group and mark commits as used
+            final_groups.append(group)
+            used_commits.update(group_commits)
+        
+        return final_groups
     
 
     def _select_best_group(self, groups: List[CommitGroup]) -> CommitGroup:
@@ -229,10 +228,11 @@ class GroupingEngine:
     def _create_individual_group(self, commit: Commit, group_id: str) -> CommitGroup:
         """Create a group containing a single commit."""
         return CommitGroup(
+            id=group_id,
             commits=[commit],
-            rationale=f"Individual commit (no grouping opportunity found)",
+            rationale=f"individual commit (no grouping opportunity found)",
+            suggested_message=commit.message,
             confidence=1.0,
-            group_id=group_id,
             scope="",
             files_touched=set(commit.files),
             total_insertions=commit.insertions,
