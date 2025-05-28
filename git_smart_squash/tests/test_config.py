@@ -21,7 +21,7 @@ class TestConfigManager:
         
         assert isinstance(config, Config)
         assert config.grouping.time_window == 1800
-        assert config.ai.provider == "openai"
+        assert config.ai.provider == "local"
         assert config.output.dry_run_default is True
     
     def test_load_config_from_file(self):
