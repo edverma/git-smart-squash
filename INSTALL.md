@@ -1,8 +1,8 @@
-# Installation Guide for git-smart-squash v1.2.1
+# Installation Guide for git-smart-squash v1.2.2
 
-## 🎉 Published to PyPI & GitHub!
+## 🎉 Version Alignment Complete!
 
-Version 1.2.1 has been successfully published to PyPI with critical bug fixes and is available on GitHub.
+Version 1.2.2 is now consistently available across all platforms - PyPI, GitHub, and Homebrew all use the same version number.
 
 ## Installation Options
 
@@ -60,13 +60,13 @@ python -c "import git_smart_squash; print(git_smart_squash.__version__)"
 ## Package Information
 
 - **Package Name:** git-smart-squash
-- **PyPI Version:** 1.2.1 (includes critical bug fixes)
-- **GitHub Release:** v1.2.2
-- **PyPI URL:** https://pypi.org/project/git-smart-squash/1.2.1/
+- **Version:** 1.2.2 (consistent across all platforms)
+- **PyPI URL:** https://pypi.org/project/git-smart-squash/1.2.2/
 - **GitHub Release:** https://github.com/edverma/git-smart-squash/releases/tag/v1.2.2
+- **Homebrew Formula:** Ready with v1.2.2
 - **GitHub Repository:** https://github.com/edverma/git-smart-squash
 
-## What's New in v1.2.1
+## What's New in v1.2.2
 
 ### 🐛 **Critical Bug Fix**
 - **Fixed commit counting error**: Resolved "too many values to unpack (expected 2)" error in zero-friction CLI
