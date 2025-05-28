@@ -23,25 +23,44 @@ class MessageGenerator:
             return AnthropicProvider(self.config)
         elif self.config.provider.lower() == "local":
             return LocalProvider(self.config)
+        elif self.config.provider.lower() == "template":
+            # For template provider, we'll use None and handle in generate_message
+            return None
         else:
             raise ValueError(f"Unsupported AI provider: {self.config.provider}")
     
     def generate_message(self, group: CommitGroup) -> str:
         """Generate a commit message for a group of commits."""
         try:
-            # Generate message using the provider
+            # Handle template provider directly
+            if self.provider is None:  # Template provider
+                return self._generate_fallback_message(group)
+            
+            # Generate message using the AI provider
             message = self.provider.generate_commit_message(group)
             
             if message:
                 # Validate and format the message
                 return validate_and_format_message(message)
             else:
-                # Provider returned None, use fallback
-                return group.suggested_message
+                # Provider returned None, use intelligent fallback
+                return self._generate_fallback_message(group)
             
         except Exception as e:
-            # Fallback to the basic suggested message
+            # Fallback to intelligent template generation
+            return self._generate_fallback_message(group)
+    
+    def _generate_fallback_message(self, group: CommitGroup) -> str:
+        """Generate an intelligent fallback message when AI fails."""
+        # Use the template generator for better fallback
+        template_generator = TemplateMessageGenerator()
+        
+        # If we have a suggested message already, use it
+        if group.suggested_message and len(group.suggested_message.strip()) > 0:
             return group.suggested_message
+        
+        # Otherwise generate from template
+        return template_generator.generate_message(group)
     
     def _build_context(self, group: CommitGroup) -> dict:
         """Build context dictionary for AI generation."""

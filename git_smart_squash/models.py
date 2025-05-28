@@ -33,12 +33,13 @@ class CommitGroup:
     id: str
     commits: List[Commit]
     rationale: str  # Why these were grouped
-    suggested_message: str
-    commit_type: str  # feat, fix, etc.
-    scope: Optional[str]
-    files_touched: Set[str]
-    total_insertions: int
-    total_deletions: int
+    suggested_message: str = ""
+    commit_type: str = "chore"  # feat, fix, etc.
+    scope: Optional[str] = None
+    files_touched: Set[str] = field(default_factory=set)
+    total_insertions: int = 0
+    total_deletions: int = 0
+    confidence: float = 1.0  # Confidence score for this grouping
 
 
 @dataclass
