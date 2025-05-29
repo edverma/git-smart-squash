@@ -83,6 +83,24 @@ class UnifiedAIProvider(BaseAIProvider):
             # Silently fail to allow fallback
             return None
     
+    def generate_grouping(self, prompt: str) -> Optional[str]:
+        """Generate commit grouping analysis using the configured provider."""
+        handlers = {
+            "openai": self._generate_grouping_openai,
+            "anthropic": self._generate_grouping_anthropic,
+            "local": self._generate_grouping_local
+        }
+        
+        handler = handlers.get(self.provider_type)
+        if not handler:
+            raise ValueError(f"Unknown provider: {self.provider_type}")
+        
+        try:
+            return handler(prompt)
+        except Exception as e:
+            # Silently fail to allow fallback
+            return None
+    
     def _generate_openai(self, prompt: str) -> Optional[str]:
         """Generate using OpenAI API."""
         if not self._client:
@@ -253,3 +271,211 @@ class UnifiedAIProvider(BaseAIProvider):
                 return cleaned
         
         return None
+    
+    def _generate_grouping_openai(self, prompt: str) -> Optional[str]:
+        """Generate grouping analysis using OpenAI API."""
+        if not self._client:
+            return None
+        
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are an expert at analyzing git commits and determining optimal grouping strategies. You always respond with valid JSON only, no other text."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,  # Lower temperature for more consistent JSON
+                max_tokens=2000   # More tokens for detailed analysis
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception:
+            return None
+    
+    def _generate_grouping_anthropic(self, prompt: str) -> Optional[str]:
+        """Generate grouping analysis using Anthropic API."""
+        if not self._client:
+            return None
+        
+        try:
+            # Use default model if specified model is old format
+            model = self.model
+            if model == "claude-3-sonnet-20240229":
+                model = "claude-3-5-sonnet-20241022"
+            
+            response = self._client.messages.create(
+                model=model,
+                max_tokens=2000,
+                temperature=0.1,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"You are an expert at analyzing git commits and determining optimal grouping strategies. You always respond with valid JSON only, no other text.\n\n{prompt}"
+                    }
+                ]
+            )
+            
+            return response.content[0].text.strip()
+            
+        except Exception:
+            return None
+    
+    def _generate_grouping_local(self, prompt: str) -> Optional[str]:
+        """Generate grouping analysis using local model."""
+        # Add system instruction for local models
+        enhanced_prompt = f"""You are an expert at analyzing git commits and determining optimal grouping strategies. You must respond with valid JSON only, no other text.
+
+{prompt}"""
+        
+        # Try Ollama API first
+        result = self._try_ollama_grouping_api(enhanced_prompt)
+        if result:
+            return result
+        
+        # Try Ollama CLI
+        result = self._try_ollama_grouping_cli(enhanced_prompt)
+        if result:
+            return result
+        
+        # Try llama.cpp
+        return self._try_llamacpp_grouping(enhanced_prompt)
+    
+    def _try_ollama_grouping_api(self, prompt: str) -> Optional[str]:
+        """Try to generate grouping using Ollama API."""
+        try:
+            import requests
+            
+            url = self.config.base_url or "http://localhost:11434"
+            response = requests.post(
+                f"{url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 2000,
+                        "stop": ["\n\n---", "```"]
+                    }
+                },
+                timeout=60  # Longer timeout for complex analysis
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return self._extract_json_response(result.get("response", ""))
+                
+        except Exception:
+            pass
+        
+        return None
+    
+    def _try_ollama_grouping_cli(self, prompt: str) -> Optional[str]:
+        """Try to generate grouping using Ollama CLI."""
+        try:
+            # Check if ollama is available
+            subprocess.run(["ollama", "--version"], capture_output=True, check=True)
+            
+            # Run generation
+            result = subprocess.run(
+                ["ollama", "run", self.model, prompt],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0:
+                return self._extract_json_response(result.stdout)
+                
+        except Exception:
+            pass
+        
+        return None
+    
+    def _try_llamacpp_grouping(self, prompt: str) -> Optional[str]:
+        """Try to generate grouping using llama.cpp."""
+        try:
+            # Common llama.cpp binary names
+            for binary in ["llama", "main", "./main"]:
+                try:
+                    result = subprocess.run(
+                        [binary, "-p", prompt, "-n", "2000"],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    
+                    if result.returncode == 0:
+                        return self._extract_json_response(result.stdout)
+                        
+                except FileNotFoundError:
+                    continue
+                    
+        except Exception:
+            pass
+        
+        return None
+    
+    def _extract_json_response(self, response: str) -> Optional[str]:
+        """Extract JSON from response."""
+        if not response:
+            return None
+        
+        # Clean up the response
+        response = response.strip()
+        
+        # Try to find JSON in the response
+        start_markers = ['{', '[']
+        for marker in start_markers:
+            start_idx = response.find(marker)
+            if start_idx != -1:
+                # Try to parse from this point to end
+                try:
+                    import json
+                    json_str = response[start_idx:]
+                    # Try to parse - this will raise exception if invalid
+                    json.loads(json_str)
+                    return json_str
+                except json.JSONDecodeError:
+                    # Try to find matching closing bracket
+                    if marker == '{':
+                        end_marker = '}'
+                    else:
+                        end_marker = ']'
+                    
+                    bracket_count = 0
+                    end_idx = start_idx
+                    for i, char in enumerate(response[start_idx:], start_idx):
+                        if char == marker:
+                            bracket_count += 1
+                        elif char == end_marker:
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                end_idx = i + 1
+                                break
+                    
+                    json_str = response[start_idx:end_idx]
+                    try:
+                        json.loads(json_str)
+                        return json_str
+                    except json.JSONDecodeError:
+                        continue
+        
+        return None
+
+
+def get_ai_provider(provider_type: str, model: str) -> UnifiedAIProvider:
+    """Get AI provider instance."""
+    from ..config.manager import ConfigManager
+    config_manager = ConfigManager()
+    config = config_manager.config.ai
+    config.provider = provider_type
+    config.model = model
+    return UnifiedAIProvider(config)

@@ -11,7 +11,7 @@ class LocalProvider(BaseAIProvider):
     """Local AI model provider for generating commit messages."""
     
     def __init__(self, config: AIConfig):
-        model_name = config.model or "codellama:7b"
+        model_name = config.model or "devstral"
         super().__init__(model_name)
         self.config = config
         self.model_name = model_name

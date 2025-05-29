@@ -3,8 +3,8 @@ class GitSmartSquash < Formula
 
   desc "Automatically reorganize messy git commit histories into clean, semantic commits"
   homepage "https://github.com/edverma/git-smart-squash"
-  url "https://files.pythonhosted.org/packages/source/g/git-smart-squash/git_smart_squash-1.3.4.tar.gz"
-  sha256 "a1d65d94f4a3a45a80e65b3242f13a0bc889d67e1fc235c0ffec3dad2b34c9aa"
+  url "https://files.pythonhosted.org/packages/source/g/git-smart-squash/git_smart_squash-2.0.0.tar.gz"
+  sha256 "e870220763739cafb356f3fe099bec09d748c8c22e99d009d6699c1f57768ccd"
   license "MIT"
 
   depends_on "python@3.12"
