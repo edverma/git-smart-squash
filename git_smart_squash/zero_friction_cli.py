@@ -178,14 +178,19 @@ class ZeroFrictionCLI:
                     
             # Execute the rebase
             try:
-                print_colored("\n🔨 Executing rebase...", "blue")
+                print_colored("\n🔨 Executing rebase with automatic backup...", "blue")
                 # Use the interactive rebase executor
                 executor = InteractiveRebaseExecutor()
                 success = executor.execute_squash_plan(groups, create_backup=True)
                 
                 if not success:
                     raise Exception("Rebase execution failed")
-                print_success("\n🎉 Successfully squashed commits!")
+                
+                # Count final commits to verify success
+                current = self.parser.get_current_branch()
+                final_commits = self.parser.get_commits_between(base, current)
+                print_success(f"\n🎉 Successfully organized {len(commits)} commits into {len(final_commits)} clean commits!")
+                print_colored("   Run 'git log --oneline' to see the result.", "gray")
                 
                 # Show next steps
                 print_colored("\nNext steps:", "blue")

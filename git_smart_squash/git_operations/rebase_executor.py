@@ -123,25 +123,45 @@ class InteractiveRebaseExecutor:
             return True  # Nothing to squash
             
         try:
-            # Get the range for interactive rebase
-            oldest_commit = group.commits[-1]  # Commits are typically in reverse chronological order
-            newest_commit = group.commits[0]
+            # Sort commits by timestamp to ensure proper chronological order
+            # Oldest commit should be the base for squashing
+            sorted_commits = sorted(group.commits, key=lambda c: c.timestamp)
+            oldest_commit = sorted_commits[0]
+            newest_commit = sorted_commits[-1]
+            
+            print(f"Debug: Squashing {len(sorted_commits)} commits:")
+            for i, commit in enumerate(sorted_commits):
+                print(f"  {i}: {commit.short_hash} {commit.message} ({commit.timestamp})")
+            
+            # Verify we have the parent commit hash
+            if not hasattr(oldest_commit, 'parent_hash') or not oldest_commit.parent_hash:
+                # Get parent hash using git
+                parent_result = subprocess.run(
+                    ['git', '-C', self.repo_path, 'rev-parse', f'{oldest_commit.hash}^'],
+                    capture_output=True, text=True
+                )
+                if parent_result.returncode != 0:
+                    print(f"Failed to get parent commit for {oldest_commit.hash}")
+                    return False
+                parent_hash = parent_result.stdout.strip()
+            else:
+                parent_hash = oldest_commit.parent_hash
             
             # Create a temporary rebase todo file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
                 todo_file = f.name
                 
-                # Write rebase instructions
-                # First commit: pick (keep as-is)
+                # Write rebase instructions in chronological order
+                # First (oldest) commit: pick (keep as-is)
                 f.write(f"pick {oldest_commit.hash} {oldest_commit.message}\n")
                 
                 # Subsequent commits: squash into the first
-                for commit in reversed(group.commits[:-1]):
+                for commit in sorted_commits[1:]:
                     f.write(f"squash {commit.hash} {commit.message}\n")
                 
-                # Add the new commit message as a comment for reference
-                if group.suggested_message:
-                    f.write(f"\n# New commit message: {group.suggested_message}\n")
+                print(f"Debug: Rebase todo file content:")
+                with open(todo_file, 'r') as rf:
+                    print(rf.read())
             
             # Create commit message file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
@@ -150,26 +170,55 @@ class InteractiveRebaseExecutor:
                     f.write(group.suggested_message)
                 else:
                     f.write(f"Squashed {len(group.commits)} commits\n\n")
-                    for commit in group.commits:
+                    for commit in sorted_commits:
                         f.write(f"- {commit.message}\n")
+                
+                print(f"Debug: Commit message file content:")
+                with open(msg_file, 'r') as rf:
+                    print(rf.read())
             
             # Execute git rebase with our todo file
             env = os.environ.copy()
             env['GIT_SEQUENCE_EDITOR'] = f'cp {todo_file}'
             env['GIT_EDITOR'] = f'cp {msg_file}'
             
+            # Use parent hash for rebase range
             cmd = [
-                'git', '-C', self.repo_path, 'rebase', '-i', 
-                f'{oldest_commit.hash}^'
+                'git', '-C', self.repo_path, 'rebase', '-i', parent_hash
             ]
+            
+            print(f"Debug: Executing rebase command: {' '.join(cmd)}")
+            print(f"Debug: Rebase range: {parent_hash}..{newest_commit.hash}")
             
             result = subprocess.run(
                 cmd, 
                 env=env,
                 capture_output=True, 
                 text=True,
-                timeout=60
+                timeout=120  # Increased timeout
             )
+            
+            print(f"Debug: Rebase result code: {result.returncode}")
+            if result.stdout:
+                print(f"Debug: Rebase stdout: {result.stdout}")
+            if result.stderr:
+                print(f"Debug: Rebase stderr: {result.stderr}")
+            
+            # Verify the squash actually happened
+            if result.returncode == 0:
+                # Check if we actually have fewer commits now
+                verify_result = subprocess.run(
+                    ['git', '-C', self.repo_path, 'rev-list', '--count', f'{parent_hash}..HEAD'],
+                    capture_output=True, text=True
+                )
+                if verify_result.returncode == 0:
+                    commit_count = int(verify_result.stdout.strip())
+                    expected_count = 1  # Should be 1 commit after squashing
+                    print(f"Debug: Commit count after rebase: {commit_count} (expected: {expected_count})")
+                    
+                    if commit_count != expected_count:
+                        print(f"Warning: Expected {expected_count} commit after squashing, but found {commit_count}")
+                        return False
             
             # Clean up temporary files
             try:
@@ -186,6 +235,8 @@ class InteractiveRebaseExecutor:
                 
         except Exception as e:
             print(f"Error executing rebase for group {group_index + 1}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _get_current_branch(self) -> str:
