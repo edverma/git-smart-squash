@@ -42,6 +42,14 @@ class AIGroupingStrategy:
                 suggested_message=commits[0].message
             )]
         
+        # Check if AI provider is available
+        if not self.ai_provider:
+            raise RuntimeError(
+                "AI provider not configured. Please configure an AI provider (OpenAI, Anthropic, or local) "
+                "in your configuration file or environment variables. "
+                "See example-config.yml for configuration options."
+            )
+        
         try:
             # Prepare commit data for AI
             commit_data = self._prepare_commit_data(commits)
@@ -53,13 +61,16 @@ class AIGroupingStrategy:
             if grouping_response:
                 return self._parse_ai_response(commits, grouping_response)
             else:
-                # Fallback: create individual groups
-                return self._create_fallback_groups(commits)
+                raise RuntimeError(
+                    "AI provider failed to generate grouping response. "
+                    "Please check your AI configuration and try again."
+                )
                 
         except Exception as e:
-            print(f"AI grouping failed: {e}")
-            # Fallback to individual groups
-            return self._create_fallback_groups(commits)
+            if "AI provider not configured" in str(e) or "AI provider failed" in str(e):
+                raise e
+            else:
+                raise RuntimeError(f"AI grouping failed: {e}")
     
     def _prepare_commit_data(self, commits: List[Commit]) -> Dict[str, Any]:
         """Prepare commit data for AI analysis."""
@@ -187,8 +198,7 @@ IMPORTANT:
             return groups
             
         except (json.JSONDecodeError, KeyError) as e:
-            print(f"Failed to parse AI response: {e}")
-            return self._create_fallback_groups(commits)
+            raise RuntimeError(f"Failed to parse AI response as valid JSON: {e}")
     
     def _create_commit_group(self, group_id: str, commits: List[Commit], 
                            rationale: str, suggested_type: str, 
@@ -228,19 +238,3 @@ IMPORTANT:
             total_deletions=total_deletions
         )
     
-    def _create_fallback_groups(self, commits: List[Commit]) -> List[CommitGroup]:
-        """Create individual groups as fallback when AI fails."""
-        groups = []
-        
-        for i, commit in enumerate(commits):
-            group = self._create_commit_group(
-                group_id=f'fallback_group_{i}',
-                commits=[commit],
-                rationale='Individual commit (AI fallback)',
-                suggested_type='feat',  # Default type
-                suggested_scope=None,
-                suggested_message=commit.message
-            )
-            groups.append(group)
-        
-        return groups

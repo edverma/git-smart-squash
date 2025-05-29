@@ -48,29 +48,9 @@ class GroupingEngine:
             return ai_groups, warnings
             
         except Exception as e:
-            # Fallback: create individual groups
-            warnings = [f"AI grouping failed: {e}. Using individual groups as fallback."]
-            fallback_groups = []
-            for i, commit in enumerate(commits):
-                group = self._create_individual_group(commit, f"fallback_{i}")
-                fallback_groups.append(group)
-            
-            return fallback_groups, warnings
+            # Don't fallback - let the error propagate to inform user about AI configuration
+            raise RuntimeError(f"AI-powered commit grouping failed: {e}")  from e
     
-    
-    def _create_individual_group(self, commit: Commit, group_id: str) -> CommitGroup:
-        """Create a group containing a single commit."""
-        return CommitGroup(
-            id=group_id,
-            commits=[commit],
-            rationale="individual commit (no grouping opportunity found)",
-            suggested_message=commit.message,
-            commit_type="feat",  # Default type
-            scope=None,
-            files_touched=set(commit.files),
-            total_insertions=commit.insertions,
-            total_deletions=commit.deletions
-        )
     
     def analyze_grouping_quality(self, groups: List[CommitGroup]) -> Dict[str, any]:
         """Analyze the quality of the AI grouping results."""
