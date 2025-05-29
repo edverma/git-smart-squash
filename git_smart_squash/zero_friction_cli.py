@@ -15,7 +15,7 @@ from .zero_friction import ZeroFrictionEngine
 from .analyzer.commit_parser import GitCommitParser
 from .grouping.grouping_engine import GroupingEngine
 from .ai.message_generator import MessageGenerator
-from .git_operations.rebase_executor import RebaseScriptGenerator
+from .git_operations.rebase_executor import RebaseScriptGenerator, InteractiveRebaseExecutor
 from .git_operations.safety_checks import GitSafetyChecker as SafetyChecker
 # Color printing functions
 def print_colored(msg, color):
@@ -179,17 +179,12 @@ class ZeroFrictionCLI:
             # Execute the rebase
             try:
                 print_colored("\n🔨 Executing rebase...", "blue")
-                # Generate and execute rebase script
-                generator = RebaseScriptGenerator()
-                script_path = f"/tmp/git-smart-squash-{os.getpid()}.sh"
-                generator.generate_rebase_script(groups, script_path)
+                # Use the interactive rebase executor
+                executor = InteractiveRebaseExecutor()
+                success = executor.execute_squash_plan(groups, create_backup=True)
                 
-                # Make script executable and run it
-                os.chmod(script_path, 0o755)
-                result = subprocess.run([script_path], capture_output=True, text=True)
-                
-                if result.returncode != 0:
-                    raise Exception(f"Rebase failed: {result.stderr}")
+                if not success:
+                    raise Exception("Rebase execution failed")
                 print_success("\n🎉 Successfully squashed commits!")
                 
                 # Show next steps

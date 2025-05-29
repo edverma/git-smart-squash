@@ -353,13 +353,29 @@ Examples:
     def execute_squash(self, groups, safety_checker: GitSafetyChecker):
         """Execute the actual squash operations."""
         # Create backup if configured
-        if self.config.output.backup_branch:
+        create_backup = self.config.output.backup_branch
+        if create_backup:
             backup = safety_checker.create_backup_branch()
             self.console.print(f"[green]Created backup branch: {backup}[/green]")
         
-        # For MVP, we generate scripts instead of direct execution
-        self.console.print("[yellow]Direct execution will be implemented in future versions[/yellow]")
-        self.console.print("For now, use --dry-run to generate a safe execution script")
+        # Execute the rebase using InteractiveRebaseExecutor
+        try:
+            self.console.print("[blue]Executing rebase operations...[/blue]")
+            executor = InteractiveRebaseExecutor()
+            success = executor.execute_squash_plan(groups, create_backup=create_backup)
+            
+            if success:
+                self.console.print("[green]✅ Successfully squashed commits![/green]")
+                self.console.print("\n[blue]Next steps:[/blue]")
+                self.console.print("  • Review the changes: git log --oneline")
+                self.console.print("  • Force push if needed: git push --force-with-lease")
+            else:
+                self.console.print("[red]❌ Rebase execution failed[/red]")
+                
+        except Exception as e:
+            self.console.print(f"[red]❌ Error during rebase: {e}[/red]")
+            if create_backup:
+                self.console.print("[yellow]Your work is safe - check backup branches[/yellow]")
     
     def handle_config_command(self, args):
         """Handle config subcommand."""
