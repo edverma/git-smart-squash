@@ -3,8 +3,8 @@ class GitSmartSquash < Formula
 
   desc "Automatically reorganize messy git commit histories into clean, semantic commits"
   homepage "https://github.com/edverma/git-smart-squash"
-  url "https://files.pythonhosted.org/packages/source/g/git-smart-squash/git_smart_squash-2.1.2.tar.gz"
-  sha256 "e9312a648f53161544f49c4c9b63d50265a061e048fe7682c28c4800275b303c"
+  url "https://files.pythonhosted.org/packages/source/g/git-smart-squash/git_smart_squash-2.2.0.tar.gz"
+  sha256 "c20744bf8d3b82e34ba3ad90bf0ee611cfbf435775d5ba2c283a0417b81667b8"
   license "MIT"
 
   depends_on "python@3.12"
@@ -32,6 +32,11 @@ class GitSmartSquash < Formula
   resource "requests" do
     url "https://files.pythonhosted.org/packages/source/r/requests/requests-2.31.0.tar.gz"
     sha256 "942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1"
+  end
+
+  resource "tiktoken" do
+    url "https://files.pythonhosted.org/packages/source/t/tiktoken/tiktoken-0.8.0.tar.gz"
+    sha256 "9ccbb2740f24542534369c5635cfd9b2b3c2490754a78ac8831d99f89f94eeb2"
   end
 
   def install
