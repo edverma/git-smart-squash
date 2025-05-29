@@ -19,16 +19,27 @@ class AIGroupingStrategy:
     def _initialize_ai_provider(self):
         """Initialize AI provider to avoid circular imports."""
         try:
-            from ...ai.providers import get_ai_provider
-            self.ai_provider = get_ai_provider(self.ai_config.provider, self.ai_config.model)
+            from ...ai.providers import UnifiedAIProvider
+            self.ai_provider = UnifiedAIProvider(self.ai_config)
         except ImportError as e:
             print(f"Failed to initialize AI provider: {e}")
             self.ai_provider = None
     
     def group_commits(self, commits: List[Commit]) -> List[CommitGroup]:
         """Group commits using AI analysis."""
-        if len(commits) < 2:
+        if len(commits) == 0:
             return []
+        
+        if len(commits) == 1:
+            # Single commit - create individual group
+            return [self._create_commit_group(
+                group_id='single_commit',
+                commits=commits,
+                rationale='Single commit (no grouping needed)',
+                suggested_type='feat',
+                suggested_scope=None,
+                suggested_message=commits[0].message
+            )]
         
         try:
             # Prepare commit data for AI
@@ -77,31 +88,16 @@ class AIGroupingStrategy:
     
     def _get_ai_grouping(self, commit_data: Dict[str, Any]) -> Optional[str]:
         """Send commit data to AI and get grouping decision."""
+        if not self.ai_provider:
+            return None
+            
         prompt = self._build_grouping_prompt(commit_data)
         
-        # Use the AI provider's generate method
-        # We'll extend the base AI provider to support grouping
+        # Use the AI provider's generate_grouping method
         if hasattr(self.ai_provider, 'generate_grouping'):
             return self.ai_provider.generate_grouping(prompt)
         else:
-            # Fallback: use the commit message generation method with custom prompt
-            from ...ai.base import BaseAIProvider
-            
-            # Create a temporary implementation
-            class AIGroupingProvider(BaseAIProvider):
-                def __init__(self, provider):
-                    self.provider = provider
-                
-                def generate_commit_message(self, group):
-                    return None
-                
-                def generate_grouping(self, prompt):
-                    # This would be implemented differently for each provider
-                    # For now, return None to trigger fallback
-                    return None
-            
-            temp_provider = AIGroupingProvider(self.ai_provider)
-            return temp_provider.generate_grouping(prompt)
+            return None
     
     def _build_grouping_prompt(self, commit_data: Dict[str, Any]) -> str:
         """Build the prompt for AI grouping analysis."""
