@@ -5,8 +5,8 @@ import json
 import subprocess
 from typing import Optional, Dict, Any
 
-from ..core.models import CommitGroup, AIConfig
-from .base import BaseAIProvider
+from ...core.models import CommitGroup, AIConfig
+from ..base import BaseAIProvider
 
 
 class UnifiedAIProvider(BaseAIProvider):
@@ -18,10 +18,17 @@ class UnifiedAIProvider(BaseAIProvider):
         self.provider_type = config.provider.lower()
         
         # Provider-specific setup
-        if self.provider_type in ["openai", "anthropic"]:
-            self.api_key = os.getenv(config.api_key_env)
+        if self.provider_type == "openai":
+            self.api_key = os.getenv("OPENAI_API_KEY")
             if not self.api_key:
-                raise ValueError(f"API key not found in environment variable: {config.api_key_env}")
+                raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
+        elif self.provider_type == "anthropic":
+            self.api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not self.api_key:
+                raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.")
+        else:
+            # Local provider doesn't need API key
+            self.api_key = None
         
         # Common parameters
         self.temperature = 0.3
