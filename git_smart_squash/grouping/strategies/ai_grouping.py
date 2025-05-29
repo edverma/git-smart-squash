@@ -44,11 +44,22 @@ class AIGroupingStrategy:
         
         # Check if AI provider is available
         if not self.ai_provider:
-            raise RuntimeError(
-                "AI provider not configured. Please configure an AI provider (OpenAI, Anthropic, or local) "
-                "in your configuration file or environment variables. "
-                "See example-config.yml for configuration options."
-            )
+            if self.ai_config.provider == "local":
+                raise RuntimeError(
+                    "Local AI (Ollama) not available. Please install and run Ollama:\n\n"
+                    "1. Install: https://ollama.ai\n"
+                    "2. Run: ollama pull devstral\n"
+                    "3. Start: ollama serve\n\n"
+                    "Or configure cloud AI with API keys:\n"
+                    "  • OpenAI: export OPENAI_API_KEY=your-key\n"
+                    "  • Anthropic: export ANTHROPIC_API_KEY=your-key"
+                )
+            else:
+                raise RuntimeError(
+                    "AI provider not configured. Please configure an AI provider (OpenAI, Anthropic, or local) "
+                    "in your configuration file or environment variables. "
+                    "See example-config.yml for configuration options."
+                )
         
         try:
             # Prepare commit data for AI

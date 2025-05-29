@@ -52,15 +52,10 @@ class ZeroFrictionEngine:
             self.logger("🔑 Found Anthropic API key")
             return "anthropic", "claude-3-haiku-20240307", None
             
-        # No AI provider found - require configuration
-        raise RuntimeError(
-            "❌ No AI provider configured. Git Smart Squash v2.x requires AI configuration.\n\n"
-            "Please configure one of the following:\n"
-            "  • OpenAI: Set OPENAI_API_KEY environment variable\n"
-            "  • Anthropic: Set ANTHROPIC_API_KEY environment variable\n"
-            "  • Local: Install and run Ollama (https://ollama.ai)\n\n"
-            "For detailed configuration, see: example-config.yml"
-        )
+        # Default to local Ollama with devstral model
+        self.logger("🦙 Using default local AI (devstral via Ollama)")
+        self.logger("💡 Tip: Install Ollama and run 'ollama pull devstral' for best experience")
+        return "local", "devstral", "http://localhost:11434"
         
     def _check_ollama(self) -> bool:
         """Check if Ollama is running locally."""
