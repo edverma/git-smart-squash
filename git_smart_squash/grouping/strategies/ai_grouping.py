@@ -4,6 +4,7 @@ import json
 from typing import List, Optional, Dict, Any
 from ...models import Commit, CommitGroup, GroupingConfig
 from ...config.manager import ConfigManager
+from ...utils.token_utils import TokenManager, optimize_commit_data_for_tokens
 
 
 class AIGroupingStrategy:
@@ -14,6 +15,7 @@ class AIGroupingStrategy:
         self.config_manager = ConfigManager()
         self.ai_config = self.config_manager.config.ai
         self.ai_provider = None
+        self.token_manager = TokenManager()
         self._initialize_ai_provider()
     
     def _initialize_ai_provider(self):
@@ -27,7 +29,7 @@ class AIGroupingStrategy:
             self.ai_provider = None
     
     def group_commits(self, commits: List[Commit]) -> List[CommitGroup]:
-        """Group commits using AI analysis."""
+        """Group commits using AI analysis with intelligent batching."""
         if len(commits) == 0:
             return []
         
@@ -62,26 +64,91 @@ class AIGroupingStrategy:
                 )
         
         try:
-            # Prepare commit data for AI
-            commit_data = self._prepare_commit_data(commits)
-            
-            # Get AI grouping decision
-            grouping_response = self._get_ai_grouping(commit_data)
-            
-            # Parse AI response into CommitGroups
-            if grouping_response:
-                return self._parse_ai_response(commits, grouping_response)
-            else:
-                raise RuntimeError(
-                    "AI provider failed to generate grouping response. "
-                    "Please check your AI configuration and try again."
-                )
+            # Use token-aware processing
+            return self._group_commits_with_token_management(commits)
                 
         except Exception as e:
             if "AI provider not configured" in str(e) or "AI provider failed" in str(e):
                 raise e
             else:
                 raise RuntimeError(f"AI grouping failed: {e}")
+    
+    def _group_commits_with_token_management(self, commits: List[Commit]) -> List[CommitGroup]:
+        """Group commits using token-aware processing and batching."""
+        # Prepare optimized commit data
+        commit_data = optimize_commit_data_for_tokens(commits)
+        
+        # Estimate prompt tokens
+        prompt_tokens = self.token_manager.estimate_prompt_tokens(commit_data)
+        
+        # Check if we need batching
+        if self.token_manager.should_use_batching(prompt_tokens, len(commits)):
+            print(f"📊 Processing {len(commits)} commits in {len(commits)//20 + 1} batches for optimal AI analysis...")
+            return self._group_commits_in_batches(commits)
+        else:
+            # Process as single batch with dynamic token limits
+            return self._group_commits_single_batch(commits)
+    
+    def _group_commits_in_batches(self, commits: List[Commit]) -> List[CommitGroup]:
+        """Process large commit sets in smaller batches."""
+        batches = self.token_manager.create_batches(commits, target_batch_size=20)
+        all_groups = []
+        
+        for i, batch in enumerate(batches):
+            print(f"🔄 Processing batch {i+1}/{len(batches)} ({len(batch)} commits)...")
+            
+            # Process each batch
+            batch_groups = self._group_commits_single_batch(batch)
+            
+            # Adjust group IDs to avoid conflicts
+            for group in batch_groups:
+                group.id = f"batch_{i+1}_{group.id}"
+            
+            all_groups.extend(batch_groups)
+        
+        # TODO: Post-process to merge related groups across batches
+        # For now, return all groups as-is
+        return all_groups
+    
+    def _group_commits_single_batch(self, commits: List[Commit]) -> List[CommitGroup]:
+        """Process a single batch of commits."""
+        # Prepare commit data for AI
+        commit_data = optimize_commit_data_for_tokens(commits)
+        
+        # Get AI grouping decision with dynamic token limits
+        grouping_response = self._get_ai_grouping_with_tokens(commit_data)
+        
+        # Parse AI response into CommitGroups
+        if grouping_response:
+            return self._parse_ai_response(commits, grouping_response)
+        else:
+            raise RuntimeError(
+                "AI provider failed to generate grouping response. "
+                "Please check your AI configuration and try again."
+            )
+    
+    def _get_ai_grouping_with_tokens(self, commit_data: Dict[str, Any]) -> Optional[str]:
+        """Send commit data to AI with dynamic token management."""
+        if not self.ai_provider:
+            return None
+            
+        prompt = self._build_grouping_prompt(commit_data)
+        
+        # Count actual prompt tokens
+        prompt_tokens = self.token_manager.count_tokens(prompt)
+        
+        # Calculate optimal num_predict
+        num_predict = self.token_manager.calculate_num_predict(prompt_tokens, commit_data['total_commits'])
+        
+        print(f"🧠 Prompt: {prompt_tokens} tokens, Response limit: {num_predict} tokens")
+        
+        # Use the AI provider's generate_grouping method with dynamic tokens
+        if hasattr(self.ai_provider, 'generate_grouping_with_tokens'):
+            return self.ai_provider.generate_grouping_with_tokens(prompt, num_predict)
+        elif hasattr(self.ai_provider, 'generate_grouping'):
+            return self.ai_provider.generate_grouping(prompt)
+        else:
+            return None
     
     def _prepare_commit_data(self, commits: List[Commit]) -> Dict[str, Any]:
         """Prepare commit data for AI analysis."""

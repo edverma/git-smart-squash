@@ -22,6 +22,7 @@ requirements = [
     "openai>=1.0.0",
     "anthropic>=0.3.0",
     "requests>=2.28.0",
+    "tiktoken>=0.5.0",
 ]
 
 

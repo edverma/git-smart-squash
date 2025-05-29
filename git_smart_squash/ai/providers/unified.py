@@ -108,6 +108,24 @@ class UnifiedAIProvider(BaseAIProvider):
             # Silently fail to allow fallback
             return None
     
+    def generate_grouping_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Generate commit grouping analysis with dynamic token limits."""
+        handlers = {
+            "openai": lambda p: self._generate_grouping_openai_with_tokens(p, num_predict),
+            "anthropic": lambda p: self._generate_grouping_anthropic_with_tokens(p, num_predict),
+            "local": lambda p: self._generate_grouping_local_with_tokens(p, num_predict)
+        }
+        
+        handler = handlers.get(self.provider_type)
+        if not handler:
+            raise ValueError(f"Unknown provider: {self.provider_type}")
+        
+        try:
+            return handler(prompt)
+        except Exception as e:
+            # Silently fail to allow fallback
+            return None
+    
     def _generate_openai(self, prompt: str) -> Optional[str]:
         """Generate using OpenAI API."""
         if not self._client:
@@ -298,7 +316,7 @@ class UnifiedAIProvider(BaseAIProvider):
                     }
                 ],
                 temperature=0.1,  # Lower temperature for more consistent JSON
-                max_tokens=2000   # More tokens for detailed analysis
+                max_tokens=12000  # More tokens for detailed analysis
             )
             
             return response.choices[0].message.content.strip()
@@ -319,7 +337,7 @@ class UnifiedAIProvider(BaseAIProvider):
             
             response = self._client.messages.create(
                 model=model,
-                max_tokens=2000,
+                max_tokens=12000,
                 temperature=0.1,
                 messages=[
                     {
@@ -368,7 +386,7 @@ class UnifiedAIProvider(BaseAIProvider):
                     "stream": False,
                     "options": {
                         "temperature": 0.1,
-                        "num_predict": 2000,
+                        "num_predict": 12000,
                         "stop": ["\n\n---", "```"]
                     }
                 },
@@ -413,7 +431,7 @@ class UnifiedAIProvider(BaseAIProvider):
             for binary in ["llama", "main", "./main"]:
                 try:
                     result = subprocess.run(
-                        [binary, "-p", prompt, "-n", "2000"],
+                        [binary, "-p", prompt, "-n", "12000"],
                         capture_output=True,
                         text=True,
                         timeout=60
@@ -474,6 +492,161 @@ class UnifiedAIProvider(BaseAIProvider):
                         return json_str
                     except json.JSONDecodeError:
                         continue
+        
+        return None
+    
+    def _generate_grouping_openai_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Generate grouping analysis using OpenAI API with dynamic token limits."""
+        if not self._client:
+            return None
+        
+        try:
+            # Use default model if specified model is old format
+            model = self.model
+            
+            response = self._client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are an expert at analyzing git commits and determining optimal grouping strategies. You always respond with valid JSON only, no other text."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,  # Lower temperature for more consistent JSON
+                max_tokens=min(num_predict, 4000)  # OpenAI limit
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception:
+            return None
+    
+    def _generate_grouping_anthropic_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Generate grouping analysis using Anthropic API with dynamic token limits."""
+        if not self._client:
+            return None
+        
+        try:
+            # Use default model if specified model is old format
+            model = self.model
+            if model == "claude-3-sonnet-20240229":
+                model = "claude-3-5-sonnet-20241022"
+            
+            response = self._client.messages.create(
+                model=model,
+                max_tokens=min(num_predict, 4000),  # Anthropic limit
+                temperature=0.1,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"You are an expert at analyzing git commits and determining optimal grouping strategies. You always respond with valid JSON only, no other text.\n\n{prompt}"
+                    }
+                ]
+            )
+            
+            return response.content[0].text.strip()
+            
+        except Exception:
+            return None
+    
+    def _generate_grouping_local_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Generate grouping analysis using local model with dynamic token limits."""
+        # Add system instruction for local models
+        enhanced_prompt = f"""You are an expert at analyzing git commits and determining optimal grouping strategies. You must respond with valid JSON only, no other text.
+
+{prompt}"""
+        
+        # Try Ollama API first with dynamic tokens
+        result = self._try_ollama_grouping_api_with_tokens(enhanced_prompt, num_predict)
+        if result:
+            return result
+        
+        # Try Ollama CLI with dynamic tokens
+        result = self._try_ollama_grouping_cli_with_tokens(enhanced_prompt, num_predict)
+        if result:
+            return result
+        
+        # Try llama.cpp with dynamic tokens
+        return self._try_llamacpp_grouping_with_tokens(enhanced_prompt, num_predict)
+    
+    def _try_ollama_grouping_api_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Try to generate grouping using Ollama API with dynamic token limits."""
+        try:
+            import requests
+            
+            url = self.config.base_url or "http://localhost:11434"
+            response = requests.post(
+                f"{url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": num_predict,
+                        "stop": ["\n\n---", "```"]
+                    }
+                },
+                timeout=60  # Longer timeout for complex analysis
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return self._extract_json_response(result.get("response", ""))
+                
+        except Exception:
+            pass
+        
+        return None
+    
+    def _try_ollama_grouping_cli_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Try to generate grouping using Ollama CLI with dynamic token limits."""
+        try:
+            # Check if ollama is available
+            subprocess.run(["ollama", "--version"], capture_output=True, check=True)
+            
+            # Run generation - CLI doesn't support num_predict, so we use timeout instead
+            timeout = min(max(num_predict // 50, 30), 120)  # Scale timeout with expected tokens
+            result = subprocess.run(
+                ["ollama", "run", self.model, prompt],
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            
+            if result.returncode == 0:
+                return self._extract_json_response(result.stdout)
+                
+        except Exception:
+            pass
+        
+        return None
+    
+    def _try_llamacpp_grouping_with_tokens(self, prompt: str, num_predict: int) -> Optional[str]:
+        """Try to generate grouping using llama.cpp with dynamic token limits."""
+        try:
+            # Common llama.cpp binary names
+            for binary in ["llama", "main", "./main"]:
+                try:
+                    result = subprocess.run(
+                        [binary, "-p", prompt, "-n", str(num_predict)],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    
+                    if result.returncode == 0:
+                        return self._extract_json_response(result.stdout)
+                        
+                except FileNotFoundError:
+                    continue
+                    
+        except Exception:
+            pass
         
         return None
 
