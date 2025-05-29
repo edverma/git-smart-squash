@@ -21,8 +21,9 @@ class AIGroupingStrategy:
         try:
             from ...ai.providers import UnifiedAIProvider
             self.ai_provider = UnifiedAIProvider(self.ai_config)
-        except ImportError as e:
-            print(f"Failed to initialize AI provider: {e}")
+        except Exception:
+            # Silently fail - AI grouping will use fallback to individual groups
+            # This is expected when AI providers are not properly configured
             self.ai_provider = None
     
     def group_commits(self, commits: List[Commit]) -> List[CommitGroup]:
