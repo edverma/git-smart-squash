@@ -41,10 +41,10 @@ class UnifiedAIProvider:
     
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count using conservative heuristics."""
-        # More conservative estimation for code/diffs: 1 token ≈ 3 characters
+        # Conservative estimation for code/diffs: 1 token ≈ 2.5 characters
         # This overestimates to ensure we don't truncate prompts
         # Code and technical content typically has higher token density
-        return max(1, len(text) // 3)
+        return max(1, len(text) // 2.5)
     
     def _calculate_dynamic_params(self, prompt: str) -> dict:
         """Calculate optimal token parameters based on prompt size for any provider."""
