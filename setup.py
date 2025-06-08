@@ -31,10 +31,21 @@ class PostInstallCommand(install):
     
     def run(self):
         install.run(self)
-        # Run post-install script to create default global config
+        # Create default global config if it doesn't exist
         try:
-            subprocess.check_call([sys.executable, "-c", 
-                "from git_smart_squash.post_install import main; main()"])
+            import os
+            from pathlib import Path
+            config_path = Path.home() / ".git-smart-squash.yml"
+            if not config_path.exists():
+                config_content = """ai:
+  provider: local  # or openai, anthropic
+  model: devstral  # or gpt-4, claude-3-sonnet
+  
+output:
+  backup_branch: true
+"""
+                config_path.write_text(config_content)
+                print(f"Created default config at {config_path}")
         except Exception as e:
             print(f"Warning: Post-install setup failed: {e}", file=sys.stderr)
 
@@ -81,7 +92,7 @@ setup(
     entry_points={
         "console_scripts": [
             "git-smart-squash=git_smart_squash.cli:main",
-            "gss=git_smart_squash.zero_friction_cli_enhanced:main",
+            "gss=git_smart_squash.cli:main",
         ],
     },
     cmdclass={
