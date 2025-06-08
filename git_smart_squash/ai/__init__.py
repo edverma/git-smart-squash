@@ -1,6 +1,5 @@
 """AI-powered commit message generation."""
 
-from .base import BaseAIProvider
-from .message_generator import MessageGenerator, TemplateMessageGenerator
+from .providers.simple_unified import UnifiedAIProvider
 
-__all__ = ['BaseAIProvider', 'MessageGenerator', 'TemplateMessageGenerator']
+__all__ = ['UnifiedAIProvider']

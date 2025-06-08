@@ -1,1 +1,0 @@
-"""Utility modules for git-smart-squash."""
