@@ -40,11 +40,11 @@ class UnifiedAIProvider:
         self.provider_type = config.ai.provider.lower()
     
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count using very conservative heuristics."""
-        # Very conservative estimation for code/diffs: 1 token ≈ 1 character
-        # Code, diffs, and technical content can have very high token density
-        # Better to overestimate significantly than truncate prompts
-        return max(1, len(text))
+        """Estimate token count using conservative heuristics."""
+        # More conservative estimation for code/diffs: 1 token ≈ 3 characters
+        # This overestimates to ensure we don't truncate prompts
+        # Code and technical content typically has higher token density
+        return max(1, len(text) // 3)
     
     def _calculate_dynamic_params(self, prompt: str) -> dict:
         """Calculate optimal token parameters based on prompt size for any provider."""
@@ -92,15 +92,9 @@ class UnifiedAIProvider:
         if params["max_tokens"] > self.MAX_CONTEXT_TOKENS * 0.8:
             num_ctx = self.MAX_CONTEXT_TOKENS
         else:
-            # Use 50% safety margin since token estimation is very imperfect for code/diffs
-            # Add substantial response buffer to avoid truncation
-            safety_buffer = int(estimated_prompt_tokens * 0.50)  # 50% safety margin for code content
-            response_buffer = max(2000, estimated_prompt_tokens // 3)  # At least 2000 tokens for response
-            min_context_needed = estimated_prompt_tokens + safety_buffer + response_buffer
-            
-            # Round up to nearest 512 to avoid edge cases and improve efficiency
-            num_ctx = ((min_context_needed + 511) // 512) * 512
-            
+            # Use 15% safety margin since token estimation may be imperfect
+            min_context_needed = int(estimated_prompt_tokens * 1.15) + 1000  # 15% safety margin + response space
+            num_ctx = max(params["max_tokens"], min_context_needed)
             # Respect absolute maximum
             num_ctx = min(num_ctx, self.MAX_CONTEXT_TOKENS)
         
