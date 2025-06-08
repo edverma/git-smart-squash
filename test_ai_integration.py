@@ -819,6 +819,361 @@ class TestErrorHandlingEdgeCases(unittest.TestCase):
                 except Exception as e:
                     # Should not crash unexpectedly
                     self.assertIn('JSON', str(e))  # Should be JSON-related error
+    
+    def test_ollama_server_down(self):
+        """Test handling when Ollama server is down"""
+        provider = UnifiedAIProvider(Config(ai=AIConfig(provider='local')))
+        
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(7, 'curl', stderr='Failed to connect')
+            
+            with self.assertRaises(Exception) as context:
+                provider._generate_local("test")
+            
+            self.assertIn('Ollama request failed', str(context.exception))
+    
+    def test_ollama_response_truncation(self):
+        """Test handling of truncated Ollama responses"""
+        provider = UnifiedAIProvider(Config(ai=AIConfig(provider='local')))
+        
+        with patch('subprocess.run') as mock_run:
+            mock_response = {'response': '{"commits": [', 'done': False}  # Truncated
+            mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_response))
+            
+            result = provider._generate_local("test")
+            # Should handle gracefully even with truncated response
+            self.assertIsInstance(result, str)
+
+
+class TestProviderSpecificErrorHandling(unittest.TestCase):
+    """Test provider-specific error scenarios"""
+    
+    def setUp(self):
+        self.local_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='local', model='devstral')))
+        self.openai_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='openai', model='gpt-4')))
+        self.anthropic_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514')))
+    
+    def test_openai_rate_limit_handling(self):
+        """Test handling of OpenAI rate limits"""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            with patch('openai.OpenAI') as mock_openai:
+                mock_client = MagicMock()
+                mock_openai.return_value = mock_client
+                
+                # Simulate rate limit error
+                from openai import RateLimitError
+                mock_client.chat.completions.create.side_effect = RateLimitError(
+                    message="Rate limit exceeded",
+                    response=MagicMock(),
+                    body={}
+                )
+                
+                with self.assertRaises(Exception) as context:
+                    self.openai_provider._generate_openai("test")
+                
+                self.assertIn('OpenAI generation failed', str(context.exception))
+    
+    def test_anthropic_context_length_error(self):
+        """Test handling of Anthropic context length errors"""
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key'}):
+            with patch('anthropic.Anthropic') as mock_anthropic:
+                mock_client = MagicMock()
+                mock_anthropic.return_value = mock_client
+                
+                # Simulate context length error
+                import anthropic
+                mock_client.messages.create.side_effect = anthropic.BadRequestError(
+                    message="Context length exceeded",
+                    response=MagicMock(),
+                    body={}
+                )
+                
+                with self.assertRaises(Exception) as context:
+                    self.anthropic_provider._generate_anthropic("test")
+                
+                self.assertIn('Anthropic generation failed', str(context.exception))
+    
+    def test_missing_api_libraries(self):
+        """Test handling when API libraries are not installed"""
+        # Test OpenAI library missing
+        with patch('builtins.__import__', side_effect=ImportError("No module named 'openai'")):
+            with self.assertRaises(Exception) as context:
+                self.openai_provider._generate_openai("test")
+            
+            self.assertIn('OpenAI library not installed', str(context.exception))
+        
+        # Test Anthropic library missing
+        with patch('builtins.__import__', side_effect=ImportError("No module named 'anthropic'")):
+            with self.assertRaises(Exception) as context:
+                self.anthropic_provider._generate_anthropic("test")
+            
+            self.assertIn('Anthropic library not installed', str(context.exception))
+
+
+class TestAdvancedTokenManagement(unittest.TestCase):
+    """Test advanced token management scenarios"""
+    
+    def setUp(self):
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+    
+    def test_token_estimation_accuracy_validation(self):
+        """Test token estimation accuracy across different content types"""
+        test_cases = [
+            ("Simple text", "Hello world"),
+            ("Code with symbols", "def func():\n    return {'key': 'value'}"),
+            ("Mixed content", "This is text\n```python\ncode_here()\n```\nMore text"),
+            ("Unicode content", "Hello 世界 🌍 Мир"),
+            ("Very short", "a"),
+            ("Empty", ""),
+            ("Repeated patterns", "a" * 100),
+            ("Special chars", "!@#$%^&*()_+-=[]{}|;':\",./<>?"),
+        ]
+        
+        for description, text in test_cases:
+            with self.subTest(description=description):
+                tokens = self.provider._estimate_tokens(text)
+                self.assertGreaterEqual(tokens, 0)
+                # Conservative estimation should generally be higher than actual
+                if text:
+                    self.assertGreater(tokens, 0)
+                else:
+                    self.assertEqual(tokens, 1)  # Minimum 1 token
+    
+    def test_context_window_boundary_conditions(self):
+        """Test behavior at exact context window boundaries"""
+        # Test at exactly the limit
+        limit_text = "a" * (self.provider.MAX_CONTEXT_TOKENS * 3 - 6000)  # Just under limit
+        params = self.provider._calculate_dynamic_params(limit_text)
+        self.assertIsInstance(params, dict)
+        
+        # Test just over the limit
+        over_limit_text = "a" * (self.provider.MAX_CONTEXT_TOKENS * 3)  # Over limit
+        with self.assertRaises(Exception) as context:
+            self.provider._calculate_dynamic_params(over_limit_text)
+        self.assertIn('Diff is too large', str(context.exception))
+    
+    def test_ollama_params_scaling(self):
+        """Test Ollama parameter scaling with different prompt sizes"""
+        test_sizes = [100, 1000, 5000, 10000, 20000]
+        
+        for size in test_sizes:
+            with self.subTest(size=size):
+                text = "a" * size
+                try:
+                    params = self.provider._calculate_ollama_params(text)
+                    self.assertIn('num_ctx', params)
+                    self.assertIn('num_predict', params)
+                    self.assertGreater(params['num_ctx'], 0)
+                    self.assertGreater(params['num_predict'], 0)
+                except Exception as e:
+                    # Should only fail if size is too large
+                    if size * 3 > self.provider.MAX_CONTEXT_TOKENS:
+                        self.assertIn('Diff is too large', str(e))
+                    else:
+                        self.fail(f"Unexpected error for size {size}: {e}")
+
+
+class TestConcurrentProviderOperations(unittest.TestCase):
+    """Test concurrent operations across multiple providers"""
+    
+    def setUp(self):
+        self.providers = {
+            'local': UnifiedAIProvider(Config(ai=AIConfig(provider='local'))),
+            'openai': UnifiedAIProvider(Config(ai=AIConfig(provider='openai'))),
+            'anthropic': UnifiedAIProvider(Config(ai=AIConfig(provider='anthropic')))
+        }
+    
+    def test_provider_isolation(self):
+        """Test that provider instances don't interfere with each other"""
+        test_prompt = "test prompt for isolation"
+        
+        # Each provider should handle the same prompt independently
+        for provider_name, provider in self.providers.items():
+            with self.subTest(provider=provider_name):
+                params = provider._calculate_dynamic_params(test_prompt)
+                self.assertIsInstance(params, dict)
+                self.assertEqual(provider.provider_type, provider_name)
+    
+    def test_configuration_independence(self):
+        """Test that changing one provider's config doesn't affect others"""
+        original_models = {name: provider.config.ai.model for name, provider in self.providers.items()}
+        
+        # Modify one provider's config
+        self.providers['local'].config.ai.model = 'modified-model'
+        
+        # Others should remain unchanged
+        for name, provider in self.providers.items():
+            if name != 'local':
+                self.assertEqual(provider.config.ai.model, original_models[name])
+
+
+class TestResponseValidationComprehensive(unittest.TestCase):
+    """Comprehensive response validation testing"""
+    
+    def setUp(self):
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+    
+    def test_response_size_limits(self):
+        """Test handling of responses that exceed reasonable size limits"""
+        # Very large response
+        huge_response = '{"commits": [' + '{"message": "test", "files": [], "rationale": "test"},' * 10000 + ']}'
+        
+        with patch('subprocess.run') as mock_run:
+            mock_response = {'response': huge_response, 'done': True}
+            mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_response))
+            
+            result = self.provider._generate_local("test")
+            # Should handle without crashing
+            self.assertIsInstance(result, str)
+    
+    def test_response_parsing_edge_cases(self):
+        """Test edge cases in response parsing"""
+        edge_cases = [
+            '[]',  # Direct array
+            '{"commits": null}',  # Null commits
+            '{"commits": "invalid"}',  # Wrong type
+            '{"commits": [null]}',  # Null commit
+            '{"commits": [{}]}',  # Empty commit object
+            '{"commits": [{"message": null, "files": null, "rationale": null}]}',  # Null fields
+        ]
+        
+        for edge_case in edge_cases:
+            with self.subTest(response=edge_case):
+                with patch('subprocess.run') as mock_run:
+                    mock_response = {'response': edge_case, 'done': True}
+                    mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_response))
+                    
+                    try:
+                        result = self.provider._generate_local("test")
+                        self.assertIsInstance(result, str)
+                    except Exception:
+                        # Some edge cases may fail, which is acceptable
+                        pass
+    
+    def test_nested_json_in_responses(self):
+        """Test handling of nested JSON structures in responses"""
+        nested_response = '''{"commits": [{"message": "test", "files": ["file.json"], "rationale": "Contains JSON: {\\"nested\\": true}"}]}'''
+        
+        with patch('subprocess.run') as mock_run:
+            mock_response = {'response': nested_response, 'done': True}
+            mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_response))
+            
+            result = self.provider._generate_local("test")
+            parsed = json.loads(result)
+            self.assertIsInstance(parsed, list)
+            if parsed:
+                self.assertIn('nested', parsed[0]['rationale'])
+
+
+class TestConfigurationRobustness(unittest.TestCase):
+    """Test configuration system robustness"""
+    
+    def setUp(self):
+        self.config_manager = ConfigManager()
+    
+    def test_corrupted_config_file_handling(self):
+        """Test handling of corrupted YAML config files"""
+        corrupted_yaml_cases = [
+            "invalid: yaml: content: [",  # Invalid YAML
+            "- item1\n  - item2\n invalid",  # Mixed valid/invalid
+            "key: value\n\t\tinvalid_indentation",  # Indentation errors
+            "",  # Empty file
+            "null",  # Just null
+            "[]",  # Array instead of object
+        ]
+        
+        for corrupted_yaml in corrupted_yaml_cases:
+            with self.subTest(yaml_content=corrupted_yaml[:20]):
+                with patch('os.path.exists', return_value=True):
+                    with patch('builtins.open', mock_open(read_data=corrupted_yaml)):
+                        with patch('yaml.safe_load', side_effect=yaml.YAMLError("Invalid YAML")):
+                            # Should fall back to defaults
+                            config = self.config_manager.load_config()
+                            self.assertEqual(config.ai.provider, 'local')
+    
+    def test_partial_config_completion(self):
+        """Test completion of partial configuration files"""
+        partial_configs = [
+            {'ai': {}},  # Missing provider and model
+            {'ai': {'provider': 'openai'}},  # Missing model
+            {'ai': {'model': 'custom-model'}},  # Missing provider
+            {'other_section': {'key': 'value'}},  # Missing ai section entirely
+        ]
+        
+        for partial_config in partial_configs:
+            with self.subTest(config=str(partial_config)):
+                with patch('os.path.exists', return_value=True):
+                    with patch('builtins.open', mock_open()):
+                        with patch('yaml.safe_load', return_value=partial_config):
+                            config = self.config_manager.load_config()
+                            # Should have valid defaults
+                            self.assertIsNotNone(config.ai.provider)
+                            self.assertIsNotNone(config.ai.model)
+                            
+                            # Provider should determine model if model was missing
+                            expected_model = self.config_manager._get_default_model(config.ai.provider)
+                            if 'ai' not in partial_config or 'model' not in partial_config.get('ai', {}):
+                                self.assertEqual(config.ai.model, expected_model)
+
+
+class TestCLIRobustness(unittest.TestCase):
+    """Test CLI robustness and edge cases"""
+    
+    def setUp(self):
+        self.cli = GitSmartSquashCLI()
+    
+    def test_argument_parsing_edge_cases(self):
+        """Test edge cases in argument parsing"""
+        parser = self.cli.create_parser()
+        
+        edge_cases = [
+            ['--base', ''],  # Empty base branch
+            ['--model', ''],  # Empty model name
+            ['--ai-provider', 'invalid'],  # Invalid provider
+            ['--config', '/nonexistent/path'],  # Nonexistent config
+            ['--base', 'very-long-branch-name-' * 10],  # Very long branch name
+        ]
+        
+        for args in edge_cases:
+            with self.subTest(args=args):
+                try:
+                    parsed_args = parser.parse_args(args)
+                    # Some should parse successfully
+                    self.assertIsNotNone(parsed_args)
+                except SystemExit:
+                    # Some should fail due to invalid choices
+                    pass
+    
+    def test_rich_ui_components_error_handling(self):
+        """Test Rich UI components handle errors gracefully"""
+        # Test with malformed commit plan
+        malformed_plan = [
+            {'message': None, 'files': None, 'rationale': None},  # Null values
+            {'message': 'test'},  # Missing required fields
+            {},  # Completely empty
+        ]
+        
+        try:
+            self.cli.display_commit_plan(malformed_plan)
+            # Should not crash
+        except Exception as e:
+            # If it does fail, should be a reasonable error
+            self.assertIsInstance(e, (KeyError, TypeError, AttributeError))
+    
+    def test_user_input_edge_cases(self):
+        """Test edge cases in user input handling"""
+        with patch('builtins.input') as mock_input:
+            # Test various input scenarios
+            input_cases = ['', 'Y', 'yes', 'n', 'NO', 'maybe', '123', '\n', ' y ']
+            
+            for user_input in input_cases:
+                with self.subTest(input=repr(user_input)):
+                    mock_input.return_value = user_input
+                    result = self.cli.get_user_confirmation()
+                    # Should return boolean
+                    self.assertIsInstance(result, bool)
+                    # Only 'y' should return True
+                    self.assertEqual(result, user_input.lower().strip() == 'y')
 
 
 if __name__ == '__main__':

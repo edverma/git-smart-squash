@@ -86,6 +86,10 @@ class GitSmartSquashCLI:
     def run_smart_squash(self, args):
         """Run the simplified smart squash operation."""
         try:
+            # Ensure config is loaded
+            if self.config is None:
+                self.config = self.config_manager.load_config()
+            
             # 1. Get the full diff between base branch and current branch
             full_diff = self.get_full_diff(args.base)
             if not full_diff:
@@ -158,6 +162,10 @@ class GitSmartSquashCLI:
     def analyze_with_ai(self, diff: str) -> Optional[List[Dict[str, Any]]]:
         """Send diff to AI and get back commit organization plan."""
         try:
+            # Ensure config is loaded
+            if self.config is None:
+                self.config = self.config_manager.load_config()
+            
             ai_provider = UnifiedAIProvider(self.config)
             
             prompt = f"""Analyze this git diff and organize changes into logical commits for pull request review.
