@@ -91,7 +91,7 @@ git-smart-squash --base develop
 ### Using Specific AI Provider
 ```bash
 git-smart-squash --ai-provider openai --model gpt-4.1
-git-smart-squash --ai-provider anthropic --model claude-sonnet-4
+git-smart-squash --ai-provider anthropic --model claude-sonnet-4-20250514
 ```
 
 ## AI Providers
@@ -131,7 +131,7 @@ Minimal configuration in `~/.git-smart-squash.yml`:
 ```yaml
 ai:
   provider: local  # or openai, anthropic
-  model: devstral  # or gpt-4.1, claude-sonnet-4
+  model: devstral  # or gpt-4.1, claude-sonnet-4-20250514
   
 output:
   backup_branch: true

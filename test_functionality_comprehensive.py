@@ -229,12 +229,12 @@ class TestUsageExamplesExact(unittest.TestCase):
         self.assertEqual(args.model, 'gpt-4.1')
     
     def test_anthropic_provider_command(self):
-        """Test: git-smart-squash --ai-provider anthropic --model claude-sonnet-4"""
+        """Test: git-smart-squash --ai-provider anthropic --model claude-sonnet-4-20250514"""
         parser = self.cli.create_parser()
-        args = parser.parse_args(['--ai-provider', 'anthropic', '--model', 'claude-sonnet-4'])
+        args = parser.parse_args(['--ai-provider', 'anthropic', '--model', 'claude-sonnet-4-20250514'])
         
         self.assertEqual(args.ai_provider, 'anthropic')
-        self.assertEqual(args.model, 'claude-sonnet-4')
+        self.assertEqual(args.model, 'claude-sonnet-4-20250514')
 
 
 class TestAIProvidersExact(unittest.TestCase):
@@ -271,7 +271,7 @@ class TestAIProvidersExact(unittest.TestCase):
     def test_environment_variables_anthropic(self):
         """Test: Configure via environment variables: ANTHROPIC_API_KEY"""
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key-456'}):
-            config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4'))
+            config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
             provider = UnifiedAIProvider(config)
             
             # Test that provider configuration is correct
@@ -400,7 +400,7 @@ class TestConfigurationExact(unittest.TestCase):
         """Test: YAML configuration matches documentation format exactly"""
         yaml_content = """ai:
   provider: local  # or openai, anthropic
-  model: devstral  # or gpt-4.1, claude-sonnet-4
+  model: devstral  # or gpt-4.1, claude-sonnet-4-20250514
   
 output:
   backup_branch: true"""

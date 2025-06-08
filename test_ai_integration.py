@@ -77,7 +77,7 @@ class TestAllProvidersTokenLimits(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
         }
         
     def _get_available_providers(self):
@@ -175,7 +175,7 @@ class TestAllProvidersRealResponses(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
         }
         
     def _get_available_providers(self):
@@ -557,7 +557,7 @@ class TestAllProvidersIntegrationWithCLI(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
         }
         
     def _get_available_providers(self):
