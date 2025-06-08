@@ -4,6 +4,7 @@ import argparse
 import sys
 import subprocess
 import json
+import os
 from typing import List, Dict, Any, Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -253,15 +254,54 @@ DIFF TO ANALYZE:
                 # 3. Create new commits based on the plan
                 progress.update(task, description="Creating new commits...")
                 
-                # For now, create a single commit with all changes
-                # In a more sophisticated version, we'd split the diff by files
                 if commit_plan:
-                    subprocess.run(['git', 'add', '.'], check=True)
-                    subprocess.run([
-                        'git', 'commit', '-m', commit_plan[0]['message']
-                    ], check=True)
+                    # Unstage everything first
+                    subprocess.run(['git', 'reset', 'HEAD'], check=True, capture_output=True)
                     
-                    self.console.print(f"[green]Successfully created {len(commit_plan)} new commit(s)[/green]")
+                    commits_created = 0
+                    for i, commit in enumerate(commit_plan):
+                        progress.update(task, description=f"Creating commit {i+1}/{len(commit_plan)}: {commit['message'][:50]}...")
+                        
+                        # Stage only the files for this commit
+                        files_to_stage = commit.get('files', [])
+                        if files_to_stage:
+                            # Filter out files that don't exist (might have been deleted)
+                            existing_files = []
+                            for file_path in files_to_stage:
+                                result = subprocess.run(['git', 'ls-files', '--error-unmatch', file_path], 
+                                                      capture_output=True, text=True)
+                                if result.returncode == 0:
+                                    existing_files.append(file_path)
+                                else:
+                                    # Check if file exists but is untracked
+                                    if os.path.exists(file_path):
+                                        existing_files.append(file_path)
+                            
+                            if existing_files:
+                                subprocess.run(['git', 'add'] + existing_files, check=True)
+                                
+                                # Create the commit
+                                subprocess.run([
+                                    'git', 'commit', '-m', commit['message']
+                                ], check=True)
+                                commits_created += 1
+                            else:
+                                self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no files to stage[/yellow]")
+                        else:
+                            self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no files specified[/yellow]")
+                    
+                    # Check if there are any remaining modified files that weren't included in commits
+                    result = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)
+                    if result.returncode == 0 and result.stdout.strip():
+                        # There are still unstaged changes - stage and commit them
+                        progress.update(task, description="Creating final commit for remaining changes...")
+                        subprocess.run(['git', 'add', '.'], check=True)
+                        subprocess.run([
+                            'git', 'commit', '-m', 'chore: remaining uncommitted changes'
+                        ], check=True)
+                        commits_created += 1
+                    
+                    self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
                     self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")
                 
         except subprocess.CalledProcessError as e:

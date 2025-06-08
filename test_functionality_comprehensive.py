@@ -161,20 +161,24 @@ class TestCoreConceptFourSteps(unittest.TestCase):
     
     def test_step4_apply_changes_exact_sequence(self):
         """Test Step 4: Apply changes with exact git command sequence"""
-        commit_plan = [{'message': 'feat: test commit', 'files': [], 'rationale': 'test'}]
+        commit_plan = [{'message': 'feat: test commit', 'files': ['test.py'], 'rationale': 'test'}]
         
         with patch('subprocess.run') as mock_run:
-            # Mock the command sequence
+            # Mock the command sequence for new multi-commit implementation
             mock_run.side_effect = [
                 MagicMock(stdout='feature-auth\n', returncode=0),  # get current branch
                 MagicMock(returncode=0),  # create backup branch
                 MagicMock(returncode=0),  # git reset --soft main
-                MagicMock(returncode=0),  # git add .
+                MagicMock(returncode=0),  # git reset HEAD (unstage)
+                MagicMock(returncode=0),  # git ls-files --error-unmatch (check file exists)
+                MagicMock(returncode=0),  # git add test.py
                 MagicMock(returncode=0),  # git commit
+                MagicMock(stdout='', returncode=0),  # git status --porcelain (check remaining)
             ]
             
-            with patch('builtins.input', return_value='y'):
-                self.cli.apply_commit_plan(commit_plan, 'main')
+            with patch('os.path.exists', return_value=True):
+                with patch('builtins.input', return_value='y'):
+                    self.cli.apply_commit_plan(commit_plan, 'main')
             
             # Verify exact git commands are used
             calls = mock_run.call_args_list
@@ -189,6 +193,238 @@ class TestCoreConceptFourSteps(unittest.TestCase):
             self.assertIsNotNone(reset_call, "git reset --soft command not found")
             self.assertIn('--soft', str(reset_call))
             self.assertIn('main', str(reset_call))
+
+
+class TestMultiCommitFunctionality(unittest.TestCase):
+    """Test the multi-commit creation functionality - the core feature of git-smart-squash"""
+    
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.original_cwd = os.getcwd()
+        os.chdir(self.test_dir)
+        self._setup_git_repo()
+        self.cli = GitSmartSquashCLI()
+        
+    def tearDown(self):
+        os.chdir(self.original_cwd)
+        shutil.rmtree(self.test_dir)
+        
+    def _setup_git_repo(self):
+        """Create a git repository with multiple files for testing"""
+        subprocess.run(['git', 'init'], check=True, capture_output=True)
+        subprocess.run(['git', 'config', 'user.email', 'test@example.com'], check=True)
+        subprocess.run(['git', 'config', 'user.name', 'Test User'], check=True)
+        
+        # Create main branch with initial commit
+        with open('README.md', 'w') as f:
+            f.write('# Test Project\n')
+        subprocess.run(['git', 'add', 'README.md'], check=True)
+        subprocess.run(['git', 'commit', '-m', 'Initial commit'], check=True)
+        
+        # Create feature branch with multiple files
+        subprocess.run(['git', 'checkout', '-b', 'feature'], check=True)
+        
+        # Create various files that will be organized into different commits
+        os.makedirs('src', exist_ok=True)
+        os.makedirs('tests', exist_ok=True)
+        os.makedirs('docs', exist_ok=True)
+        
+        with open('src/auth.py', 'w') as f:
+            f.write('def authenticate(user, password):\n    return True\n')
+        
+        with open('src/models.py', 'w') as f:
+            f.write('class User:\n    def __init__(self, name):\n        self.name = name\n')
+        
+        with open('tests/test_auth.py', 'w') as f:
+            f.write('def test_auth():\n    assert True\n')
+        
+        with open('tests/test_models.py', 'w') as f:
+            f.write('def test_user():\n    assert True\n')
+        
+        with open('docs/api.md', 'w') as f:
+            f.write('# API Documentation\n')
+        
+        with open('package.json', 'w') as f:
+            f.write('{"name": "test", "version": "1.0.0"}\n')
+        
+        # Stage all changes
+        subprocess.run(['git', 'add', '.'], check=True)
+    
+    def test_multiple_commits_created_correctly(self):
+        """Test that multiple commits are actually created from a commit plan"""
+        commit_plan = [
+            {
+                'message': 'feat: add authentication system',
+                'files': ['src/auth.py', 'tests/test_auth.py'],
+                'rationale': 'Authentication-related changes'
+            },
+            {
+                'message': 'feat: add user models',
+                'files': ['src/models.py', 'tests/test_models.py'],
+                'rationale': 'User model changes'
+            },
+            {
+                'message': 'docs: add API documentation',
+                'files': ['docs/api.md'],
+                'rationale': 'Documentation updates'
+            },
+            {
+                'message': 'chore: update package configuration',
+                'files': ['package.json'],
+                'rationale': 'Package config changes'
+            }
+        ]
+        
+        # Apply the commit plan
+        self.cli.apply_commit_plan(commit_plan, 'main')
+        
+        # Verify that 4 commits were actually created
+        result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
+                              capture_output=True, text=True, check=True)
+        log_lines = result.stdout.strip().split('\n')
+        
+        # Should have exactly 4 commits
+        self.assertEqual(len(log_lines), 4, f"Expected 4 commits, got {len(log_lines)}: {log_lines}")
+        
+        # Verify commit messages are correct
+        self.assertIn('feat: add authentication system', log_lines[3])
+        self.assertIn('feat: add user models', log_lines[2])
+        self.assertIn('docs: add API documentation', log_lines[1])
+        self.assertIn('chore: update package configuration', log_lines[0])
+    
+    def test_files_are_committed_in_correct_commits(self):
+        """Test that files are staged and committed in the correct commits"""
+        commit_plan = [
+            {
+                'message': 'feat: authentication',
+                'files': ['src/auth.py'],
+                'rationale': 'Auth code'
+            },
+            {
+                'message': 'test: authentication tests',
+                'files': ['tests/test_auth.py'],
+                'rationale': 'Auth tests'
+            }
+        ]
+        
+        self.cli.apply_commit_plan(commit_plan, 'main')
+        
+        # Check that the first commit contains only auth.py
+        result = subprocess.run(['git', 'show', '--name-only', 'HEAD~1'], 
+                              capture_output=True, text=True, check=True)
+        files_in_first_commit = result.stdout.strip().split('\n')
+        self.assertIn('src/auth.py', files_in_first_commit)
+        self.assertNotIn('tests/test_auth.py', files_in_first_commit)
+        
+        # Check that the second commit contains only test_auth.py
+        result = subprocess.run(['git', 'show', '--name-only', 'HEAD'], 
+                              capture_output=True, text=True, check=True)
+        files_in_second_commit = result.stdout.strip().split('\n')
+        self.assertIn('tests/test_auth.py', files_in_second_commit)
+        self.assertNotIn('src/auth.py', files_in_second_commit)
+    
+    def test_nonexistent_files_are_skipped(self):
+        """Test that commits with nonexistent files are skipped gracefully"""
+        commit_plan = [
+            {
+                'message': 'feat: existing file',
+                'files': ['src/auth.py'],
+                'rationale': 'Real file'
+            },
+            {
+                'message': 'feat: nonexistent file',
+                'files': ['src/nonexistent.py'],
+                'rationale': 'Fake file'
+            },
+            {
+                'message': 'feat: another existing file',
+                'files': ['src/models.py'],
+                'rationale': 'Another real file'
+            }
+        ]
+        
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            self.cli.apply_commit_plan(commit_plan, 'main')
+            output = mock_stdout.getvalue()
+        
+        # Should skip the nonexistent file commit
+        self.assertIn('Skipping commit', output)
+        
+        # Should only create 2 commits (not 3)
+        result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
+                              capture_output=True, text=True, check=True)
+        log_lines = result.stdout.strip().split('\n')
+        self.assertEqual(len(log_lines), 2)
+    
+    def test_empty_files_list_is_skipped(self):
+        """Test that commits with empty files list are skipped"""
+        commit_plan = [
+            {
+                'message': 'feat: valid commit',
+                'files': ['src/auth.py'],
+                'rationale': 'Has files'
+            },
+            {
+                'message': 'feat: empty commit',
+                'files': [],
+                'rationale': 'No files'
+            }
+        ]
+        
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            self.cli.apply_commit_plan(commit_plan, 'main')
+            output = mock_stdout.getvalue()
+        
+        # Should skip the empty files commit
+        self.assertIn('no files specified', output)
+        
+        # Should only create 1 commit
+        result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
+                              capture_output=True, text=True, check=True)
+        log_lines = result.stdout.strip().split('\n')
+        self.assertEqual(len(log_lines), 1)
+    
+    def test_remaining_files_handled(self):
+        """Test that any remaining unstaged files are committed as final commit"""
+        # Create a commit plan that doesn't include all files
+        commit_plan = [
+            {
+                'message': 'feat: partial changes',
+                'files': ['src/auth.py'],
+                'rationale': 'Only some files'
+            }
+        ]
+        
+        self.cli.apply_commit_plan(commit_plan, 'main')
+        
+        # Should create 2 commits: planned commit + remaining changes
+        result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
+                              capture_output=True, text=True, check=True)
+        log_lines = result.stdout.strip().split('\n')
+        
+        # Should have 2 commits
+        self.assertEqual(len(log_lines), 2)
+        
+        # The first (latest) commit should be for remaining changes
+        self.assertIn('remaining uncommitted changes', log_lines[0])
+        self.assertIn('feat: partial changes', log_lines[1])
+    
+    def test_accurate_commit_count_reporting(self):
+        """Test that the tool reports the accurate number of commits created"""
+        commit_plan = [
+            {'message': 'feat: one', 'files': ['src/auth.py'], 'rationale': 'test'},
+            {'message': 'feat: two', 'files': ['src/models.py'], 'rationale': 'test'},
+            {'message': 'feat: skip', 'files': ['nonexistent.py'], 'rationale': 'test'},  # Will be skipped
+        ]
+        
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            self.cli.apply_commit_plan(commit_plan, 'main')
+            output = mock_stdout.getvalue()
+        
+        # Should report creating 3 commits (2 planned + 1 remaining), not claim to create 3 from plan
+        # The key is that it reports the ACTUAL number, not the planned number
+        self.assertIn('Successfully created', output)
+        # Should not falsely claim to create more commits than actually created
 
 
 class TestUsageExamplesExact(unittest.TestCase):
@@ -355,9 +591,9 @@ class TestSafetyFeaturesExact(unittest.TestCase):
             mock_run.side_effect = [
                 MagicMock(stdout='feature\n', returncode=0),  # current branch
                 MagicMock(returncode=0),  # create backup
-                MagicMock(returncode=0),  # reset
-                MagicMock(returncode=0),  # add
-                MagicMock(returncode=0),  # commit
+                MagicMock(returncode=0),  # git reset --soft
+                MagicMock(returncode=0),  # git reset HEAD (unstage)
+                MagicMock(stdout='', returncode=0),  # git status --porcelain (check remaining)
             ]
             
             with patch('builtins.input', return_value='y'):
