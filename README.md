@@ -1,234 +1,326 @@
 # Git Smart Squash
 
-Automatically reorganize messy git commit histories into clean, semantic commits suitable for pull request reviews.
+An AI-powered tool that intelligently reorganizes your git commits into logical, reviewable chunks perfect for pull requests.
 
-## Overview
+## What It Does
 
-Git Smart Squash is a command-line tool that uses AI and heuristics to intelligently group related commits and generate meaningful commit messages following conventional commit standards. It helps developers clean up their commit history before creating pull requests.
+Instead of manually squashing and organizing commits, Git Smart Squash:
 
-## Features
+1. **Analyzes your entire diff** between your feature branch and the main branch
+2. **Uses AI to organize changes** into logical, reviewable commits
+3. **Automatically restructures your git history** to match the AI's recommendations
+4. **Creates clean, conventional commits** that are easy for reviewers to understand
 
-- **Intelligent Commit Grouping**: Uses multiple strategies to group related commits:
-  - File overlap analysis
-  - Temporal proximity
-  - Semantic similarity
-  - Dependency chain detection
+### Before vs After
 
-- **AI-Powered Message Generation**: Supports multiple AI providers:
-  - OpenAI (GPT-4, GPT-3.5)
-  - Anthropic (Claude)
-  - Local models (via Ollama or llama.cpp)
+**Before** (messy commits):
+```
+* 3a1b2c3 WIP: auth stuff and models
+* 4d5e6f7 more changes
+* 8g9h0i1 tests and docs
+```
 
-- **Interactive Review**: Preview and adjust groupings before applying changes
-
-- **Safety First**: 
-  - Dry-run mode by default
-  - Automatic backup branch creation
-  - Comprehensive safety checks
-
-- **Configurable**: YAML configuration with sensible defaults
+**After** (AI-organized commits):
+```
+* a1b2c3d feat: implement user authentication system
+* e4f5g6h test: add comprehensive auth test coverage  
+* i7j8k9l docs: update API documentation for auth endpoints
+```
 
 ## Installation
 
-### PyPI (pip)
+### Install from PyPI (Recommended)
 
 ```bash
 pip install git-smart-squash
 ```
 
-### Homebrew (macOS/Linux)
+### Alternative Installation Methods
 
+**Using pipx (isolated environment):**
 ```bash
-brew install edverma/tools/git-smart-squash
+pipx install git-smart-squash
 ```
 
-Both installation methods are fully supported and provide the same functionality.
-
-### Requirements
-
-- Python 3.8+
-- Git 2.0+
-
-### Development Installation
-
+**From source:**
 ```bash
-git clone https://github.com/example/git-smart-squash.git
+git clone https://github.com/your-username/git-smart-squash.git
 cd git-smart-squash
 pip install -e .
 ```
 
 ## Quick Start
 
-```bash
-# Basic usage - analyze commits between main and HEAD
-git smart-squash
+### 1. Set up AI Provider
 
-# Specify a different base branch
-git smart-squash --base develop
-
-# Dry run to see proposed changes
-git smart-squash --dry-run
-
-# Use cloud AI instead of default local model
-git smart-squash --ai-provider openai --model gpt-4
-
-# Skip AI and use template-based messages
-git smart-squash --no-ai
-```
-
-## Configuration
-
-Git Smart Squash supports multiple configuration levels with the following precedence:
-
-1. **Explicit config** (`--config path/to/config.yml`)
-2. **Local repository config** (`.git-smart-squash.yml` in current directory)
-3. **Global user config** (`~/.git-smart-squash.yml` or `~/.config/git-smart-squash/config.yml`)
-4. **Default settings**
-
-### Automatic Configuration
-
-A default global configuration file is automatically created at `~/.git-smart-squash.yml` when you first run the tool. This provides sensible defaults that work out of the box.
-
-### Local Configuration
-
-Create a `.git-smart-squash.yml` file in your repository for project-specific settings:
-
-```bash
-# Generate a local config file
-git-smart-squash config --init
-```
-
-### Global Configuration
-
-The global configuration is created automatically on first use. You can also create or update it manually:
-
-```bash
-# Create/update global config file
-git-smart-squash config --init-global
-```
-
-This creates or updates `~/.git-smart-squash.yml` with default settings that apply across all your repositories.
-
-### Configuration Options
-
-```yaml
-grouping:
-  time_window: 1800  # 30 minutes
-  min_file_overlap: 1
-  similarity_threshold: 0.7
-
-commit_format:
-  types: [feat, fix, docs, style, refactor, test, chore]
-  scope_required: false
-  max_subject_length: 50
-
-ai:
-  provider: local  # or openai, anthropic
-  model: devstral
-  api_key_env: OPENAI_API_KEY
-
-output:
-  dry_run_default: true
-  backup_branch: true
-  force_push_protection: true
-```
-
-## AI Provider Setup
-
-### OpenAI
-```bash
-export OPENAI_API_KEY="your-api-key"
-git smart-squash --ai-provider openai --model gpt-4
-```
-
-### Anthropic
-```bash
-export ANTHROPIC_API_KEY="your-api-key"
-git smart-squash --ai-provider anthropic --model claude-3-sonnet-20240229
-```
-
-### Local Models (Ollama) - Default
+**Local AI (Default - Recommended):**
 ```bash
 # Install and start Ollama
 ollama serve
 ollama pull devstral
-
-# Use with git-smart-squash (default configuration)
-git smart-squash
-
-# Or specify explicitly
-git smart-squash --ai-provider local --model devstral
 ```
 
-## Examples
+**Or use cloud AI:**
+```bash
+# For OpenAI
+export OPENAI_API_KEY="your-api-key"
 
-### Basic Workflow
+# For Anthropic  
+export ANTHROPIC_API_KEY="your-api-key"
+```
+
+### 2. Navigate to Your Git Repository
 
 ```bash
-# 1. Check repository status
-git smart-squash status
+cd /path/to/your/repo
+git checkout your-feature-branch
+```
 
-# 2. Analyze and group commits (dry run)
-git smart-squash --dry-run
+### 3. Run Git Smart Squash
 
-# 3. Review the generated script
-cat git-smart-squash-script.sh
+**Dry run (see what it would do):**
+```bash
+git-smart-squash --dry-run
+```
 
-# 4. Apply changes if satisfied
-git smart-squash --auto
+**Apply the changes:**
+```bash
+git-smart-squash
+```
+
+**Use short command:**
+```bash
+gss --dry-run  # Same as git-smart-squash --dry-run
+```
+
+## Usage Examples
+
+### Basic Usage
+
+```bash
+# Preview the reorganization
+git-smart-squash --dry-run
+
+# Apply the reorganization  
+git-smart-squash
+
+# Use different base branch
+git-smart-squash --base develop
+
+# Use specific AI provider
+git-smart-squash --ai-provider openai --model gpt-4
 ```
 
 ### Advanced Usage
 
 ```bash
-# Use specific grouping strategies
-git smart-squash --strategies file_overlap temporal
+# Use Anthropic's Claude
+git-smart-squash --ai-provider anthropic --model claude-3-sonnet
 
-# Custom time window for temporal grouping
-git smart-squash --time-window 3600  # 1 hour
-
-# Generate script without AI
-git smart-squash --no-ai --dry-run --output my-rebase.sh
+# Custom configuration
+git-smart-squash --config .custom-config.yml
 ```
 
-## How It Works
+## AI Providers
 
-1. **Commit Analysis**: Extracts metadata, file changes, and diffs from git history
-2. **Intelligent Grouping**: Applies multiple strategies to find related commits:
-   - **File Overlap**: Groups commits that modify the same files
-   - **Temporal**: Groups commits made within a time window
-   - **Semantic**: Groups commits with similar messages or change patterns
-   - **Dependency**: Groups commits that build upon each other
-3. **Message Generation**: Uses AI or templates to create conventional commit messages
-4. **Interactive Review**: Shows proposed groupings for user approval
-5. **Safe Execution**: Creates backups and performs safety checks before applying changes
+### Local AI (Default)
+- **Provider**: Ollama with devstral model
+- **Cost**: Free
+- **Privacy**: Completely local
+- **Setup**: `ollama serve && ollama pull devstral`
+
+### OpenAI
+- **Provider**: OpenAI GPT models
+- **Cost**: Pay per use
+- **Setup**: Set `OPENAI_API_KEY` environment variable
+- **Models**: gpt-4, gpt-3.5-turbo
+
+### Anthropic
+- **Provider**: Anthropic Claude models  
+- **Cost**: Pay per use
+- **Setup**: Set `ANTHROPIC_API_KEY` environment variable
+- **Models**: claude-3-sonnet, claude-3-haiku
+
+## Configuration
+
+### Global Configuration
+
+Create `~/.git-smart-squash.yml`:
+
+```yaml
+ai:
+  provider: local  # or openai, anthropic
+  model: devstral  # or gpt-4, claude-3-sonnet
+  
+output:
+  backup_branch: true
+```
+
+### Project Configuration
+
+Create `.git-smart-squash.yml` in your project root:
+
+```yaml
+ai:
+  provider: openai
+  model: gpt-4
+```
 
 ## Safety Features
 
-- **Dry run by default**: Preview changes before applying
-- **Automatic backups**: Creates backup branches before operations
-- **Safety checks**: Verifies clean working directory, no merge conflicts, etc.
-- **Rollback support**: Easy restoration from backup branches
+### Automatic Backups
+- Creates backup branch: `your-branch-backup-1703123456`
+- Preserves original work automatically
+- Easy recovery if needed
+
+### Recovery Commands
+```bash
+# If something goes wrong, recover your original branch:
+git checkout your-branch-backup-1703123456
+git checkout your-working-branch  
+git reset --hard your-branch-backup-1703123456
+```
+
+### Validation
+- Checks for clean working directory
+- Validates base branch exists
+- Confirms changes before applying
+
+## How It Works
+
+### The 4-Step Process
+
+1. **Get Complete Diff**: Uses `git diff main...HEAD` to capture all changes
+2. **AI Analysis**: Sends diff to AI with prompt for logical commit organization
+3. **Display Plan**: Shows proposed commit structure for review
+4. **Apply Changes**: Uses `git reset --soft` and creates new commits
+
+### Technical Details
+
+- **Single Python file** (~300 lines) for simplicity
+- **Direct git commands** via subprocess
+- **Rich terminal UI** for clear feedback
+- **Conventional commit** message standards
+- **JSON response parsing** with fallback mechanisms
+
+## Token Management (Local AI)
+
+For large repositories, the tool automatically:
+
+- **Estimates token usage** (1 token ≈ 4 characters)
+- **Sets optimal context size** with hard cap at 12,000 tokens
+- **Adjusts prediction limits** up to 12,000 tokens
+- **Scales timeouts** for large requests (up to 600 seconds)
+
+## Troubleshooting
+
+### Common Issues
+
+**Ollama server not running:**
+```bash
+ollama serve
+```
+
+**Model not available:**
+```bash
+ollama pull devstral
+```
+
+**Large diffs timeout:**
+- Break changes into smaller commits first
+- Use `--base` with more recent branch
+- Check token limit warnings
+
+**API key issues:**
+```bash
+# Check environment variables
+echo $OPENAI_API_KEY
+echo $ANTHROPIC_API_KEY
+```
+
+### Error Messages
+
+**"No changes found to reorganize":**
+- Check you're on the right branch
+- Verify there are differences from base branch
+
+**"Failed to generate commit plan":**
+- Check AI provider configuration
+- Verify network connectivity (for cloud providers)
+- Try with smaller diff
+
+## Examples
+
+### Simple Authentication Feature
+
+**Input diff:**
+```diff
++++ b/src/auth.py
++def authenticate(user, password):
++    return user == "admin"
+
++++ b/tests/test_auth.py  
++def test_authenticate():
++    assert authenticate("admin", "pass")
+```
+
+**AI Output:**
+```json
+[
+  {
+    "message": "feat: add user authentication system",
+    "files": ["src/auth.py", "tests/test_auth.py"], 
+    "rationale": "Groups authentication implementation with its tests"
+  }
+]
+```
+
+### Complex Multi-File Feature
+
+**AI organizes into logical commits:**
+- `feat: implement user authentication core`
+- `feat: add user model and database integration`  
+- `test: add comprehensive auth test coverage`
+- `docs: update API documentation for auth endpoints`
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+### Development Setup
+
+```bash
+git clone https://github.com/your-username/git-smart-squash.git
+cd git-smart-squash
+pip install -e .
+
+# Run tests
+python -m pytest test_functionality_comprehensive.py
+
+# Run Ollama integration tests
+./test_with_ollama.sh
+```
+
+### Running Tests
+
+**Comprehensive functionality tests:**
+```bash
+python test_functionality_comprehensive.py
+```
+
+**Real Ollama integration tests:**
+```bash
+python test_ollama_integration.py
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Roadmap
-
-- [ ] Interactive TUI for grouping review and editing
-- [ ] Integration with popular git GUIs
-- [ ] Plugin system for custom grouping strategies
-- [ ] Team-shared configuration profiles
-- [ ] Integration with CI/CD pipelines
-- [ ] Support for more AI providers
+MIT License - see LICENSE file for details.
 
 ## Support
 
-- [Documentation](https://github.com/example/git-smart-squash#readme)
-- [Issue Tracker](https://github.com/example/git-smart-squash/issues)
-- [Discussions](https://github.com/example/git-smart-squash/discussions)
+- **Issues**: Report bugs and feature requests on GitHub
+- **Documentation**: See `FUNCTIONALITY.md` for detailed technical specs
+- **AI Integration**: See `OLLAMA_INTEGRATION.md` for token management details
+
+---
+
+**Made with ❤️ for developers who want cleaner git history**
