@@ -40,11 +40,11 @@ class UnifiedAIProvider:
         self.provider_type = config.ai.provider.lower()
     
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count using conservative heuristics."""
-        # Conservative estimation for code/diffs: 1 token ≈ 2.5 characters
-        # This overestimates to ensure we don't truncate prompts
-        # Code and technical content typically has higher token density
-        return max(1, len(text) // 2.5)
+        """Estimate token count using very conservative heuristics."""
+        # Very conservative estimation for code/diffs: 1 token ≈ 1 character
+        # Code, diffs, and technical content can have very high token density
+        # Better to overestimate significantly than truncate prompts
+        return max(1, len(text))
     
     def _calculate_dynamic_params(self, prompt: str) -> dict:
         """Calculate optimal token parameters based on prompt size for any provider."""
@@ -92,10 +92,10 @@ class UnifiedAIProvider:
         if params["max_tokens"] > self.MAX_CONTEXT_TOKENS * 0.8:
             num_ctx = self.MAX_CONTEXT_TOKENS
         else:
-            # Use 30% safety margin since token estimation may be imperfect
+            # Use 50% safety margin since token estimation is very imperfect for code/diffs
             # Add substantial response buffer to avoid truncation
-            safety_buffer = int(estimated_prompt_tokens * 0.30)  # 30% safety margin
-            response_buffer = max(1500, estimated_prompt_tokens // 4)  # At least 1500 tokens for response
+            safety_buffer = int(estimated_prompt_tokens * 0.50)  # 50% safety margin for code content
+            response_buffer = max(2000, estimated_prompt_tokens // 3)  # At least 2000 tokens for response
             min_context_needed = estimated_prompt_tokens + safety_buffer + response_buffer
             
             # Round up to nearest 512 to avoid edge cases and improve efficiency
