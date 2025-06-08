@@ -23,21 +23,32 @@ class UnifiedAIProvider:
         # This is conservative and works reasonably well for most models
         return max(1, len(text) // 4)
     
-    def _calculate_ollama_params(self, prompt: str) -> dict:
-        """Calculate optimal num_ctx and num_predict for Ollama based on prompt size."""
+    def _calculate_dynamic_params(self, prompt: str) -> dict:
+        """Calculate optimal token parameters based on prompt size for any provider."""
         prompt_tokens = self._estimate_tokens(prompt)
         
         # Set context size based on prompt length, with safety margin
         context_needed = prompt_tokens + 1000  # Extra buffer for response
-        num_ctx = min(context_needed, self.MAX_CONTEXT_TOKENS)
+        max_tokens = min(context_needed, self.MAX_CONTEXT_TOKENS)
         
         # Set prediction tokens based on expected response size
         # For commit organization, we expect structured JSON responses
-        num_predict = min(2000, self.MAX_PREDICT_TOKENS)
+        response_tokens = min(2000, self.MAX_PREDICT_TOKENS)
         
         return {
-            "num_ctx": num_ctx,
-            "num_predict": num_predict
+            "prompt_tokens": prompt_tokens,
+            "max_tokens": max_tokens,
+            "response_tokens": response_tokens,
+            "context_needed": context_needed
+        }
+    
+    def _calculate_ollama_params(self, prompt: str) -> dict:
+        """Calculate optimal num_ctx and num_predict for Ollama based on prompt size."""
+        params = self._calculate_dynamic_params(prompt)
+        
+        return {
+            "num_ctx": params["max_tokens"],
+            "num_predict": params["response_tokens"]
         }
         
     def generate(self, prompt: str) -> str:
@@ -100,7 +111,7 @@ class UnifiedAIProvider:
             raise Exception(f"Local AI generation failed: {e}")
     
     def _generate_openai(self, prompt: str) -> str:
-        """Generate using OpenAI API."""
+        """Generate using OpenAI API with dynamic token management."""
         try:
             import openai
             
@@ -108,14 +119,28 @@ class UnifiedAIProvider:
             if not api_key:
                 raise Exception("OPENAI_API_KEY environment variable not set")
             
+            # Calculate dynamic parameters
+            params = self._calculate_dynamic_params(prompt)
+            
+            # Warn if prompt is very large
+            if params["prompt_tokens"] > 10000:
+                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens). Response may be truncated.")
+            
             client = openai.OpenAI(api_key=api_key)
+            
+            # Use dynamic max_tokens, capped at API limits
+            max_tokens = min(params["response_tokens"], 4096)  # OpenAI API limit for responses
             
             response = client.chat.completions.create(
                 model=self.config.ai.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
+                max_tokens=max_tokens,
                 temperature=0.7
             )
+            
+            # Check if response was truncated
+            if response.choices[0].finish_reason == "length":
+                print(f"Warning: OpenAI response truncated at {max_tokens} tokens. Consider reducing diff size.")
             
             return response.choices[0].message.content
             
@@ -125,7 +150,7 @@ class UnifiedAIProvider:
             raise Exception(f"OpenAI generation failed: {e}")
     
     def _generate_anthropic(self, prompt: str) -> str:
-        """Generate using Anthropic API."""
+        """Generate using Anthropic API with dynamic token management."""
         try:
             import anthropic
             
@@ -133,13 +158,27 @@ class UnifiedAIProvider:
             if not api_key:
                 raise Exception("ANTHROPIC_API_KEY environment variable not set")
             
+            # Calculate dynamic parameters
+            params = self._calculate_dynamic_params(prompt)
+            
+            # Warn if prompt is very large
+            if params["prompt_tokens"] > 150000:  # Claude's context limit is ~200k tokens
+                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens). May approach Claude's context limit.")
+            
             client = anthropic.Anthropic(api_key=api_key)
+            
+            # Use dynamic max_tokens, capped at API limits
+            max_tokens = min(params["response_tokens"], 4096)  # Claude API limit for responses
             
             response = client.messages.create(
                 model=self.config.ai.model,
-                max_tokens=1000,
+                max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}]
             )
+            
+            # Check if response was truncated
+            if response.stop_reason == "max_tokens":
+                print(f"Warning: Anthropic response truncated at {max_tokens} tokens. Consider reducing diff size.")
             
             return response.content[0].text
             

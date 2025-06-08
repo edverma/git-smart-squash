@@ -108,14 +108,20 @@ git-smart-squash
 git-smart-squash --base develop
 
 # Use specific AI provider
-git-smart-squash --ai-provider openai --model gpt-4
+git-smart-squash --ai-provider openai --model gpt-4.1
 ```
 
 ### Advanced Usage
 
 ```bash
-# Use Anthropic's Claude
-git-smart-squash --ai-provider anthropic --model claude-3-sonnet
+# Use OpenAI (automatically uses gpt-4.1)
+git-smart-squash --ai-provider openai
+
+# Use Anthropic (automatically uses claude-sonnet-4)
+git-smart-squash --ai-provider anthropic
+
+# Use specific model
+git-smart-squash --ai-provider openai --model gpt-4.1
 
 # Custom configuration
 git-smart-squash --config .custom-config.yml
@@ -133,13 +139,13 @@ git-smart-squash --config .custom-config.yml
 - **Provider**: OpenAI GPT models
 - **Cost**: Pay per use
 - **Setup**: Set `OPENAI_API_KEY` environment variable
-- **Models**: gpt-4, gpt-3.5-turbo
+- **Models**: gpt-4.1
 
 ### Anthropic
 - **Provider**: Anthropic Claude models  
 - **Cost**: Pay per use
 - **Setup**: Set `ANTHROPIC_API_KEY` environment variable
-- **Models**: claude-3-sonnet, claude-3-haiku
+- **Models**: claude-sonnet-4
 
 ## Configuration
 
@@ -150,7 +156,7 @@ Create `~/.git-smart-squash.yml`:
 ```yaml
 ai:
   provider: local  # or openai, anthropic
-  model: devstral  # or gpt-4, claude-3-sonnet
+  model: devstral  # or gpt-4.1, claude-sonnet-4
   
 output:
   backup_branch: true
@@ -163,7 +169,7 @@ Create `.git-smart-squash.yml` in your project root:
 ```yaml
 ai:
   provider: openai
-  model: gpt-4
+  model: gpt-4.1
 ```
 
 ## Safety Features

@@ -221,20 +221,20 @@ class TestUsageExamplesExact(unittest.TestCase):
         self.assertEqual(args.base, 'develop')
     
     def test_openai_provider_command(self):
-        """Test: git-smart-squash --ai-provider openai --model gpt-4"""
+        """Test: git-smart-squash --ai-provider openai --model gpt-4.1"""
         parser = self.cli.create_parser()
-        args = parser.parse_args(['--ai-provider', 'openai', '--model', 'gpt-4'])
+        args = parser.parse_args(['--ai-provider', 'openai', '--model', 'gpt-4.1'])
         
         self.assertEqual(args.ai_provider, 'openai')
-        self.assertEqual(args.model, 'gpt-4')
+        self.assertEqual(args.model, 'gpt-4.1')
     
     def test_anthropic_provider_command(self):
-        """Test: git-smart-squash --ai-provider anthropic --model claude-3-sonnet"""
+        """Test: git-smart-squash --ai-provider anthropic --model claude-sonnet-4"""
         parser = self.cli.create_parser()
-        args = parser.parse_args(['--ai-provider', 'anthropic', '--model', 'claude-3-sonnet'])
+        args = parser.parse_args(['--ai-provider', 'anthropic', '--model', 'claude-sonnet-4'])
         
         self.assertEqual(args.ai_provider, 'anthropic')
-        self.assertEqual(args.model, 'claude-3-sonnet')
+        self.assertEqual(args.model, 'claude-sonnet-4')
 
 
 class TestAIProvidersExact(unittest.TestCase):
@@ -252,11 +252,17 @@ class TestAIProvidersExact(unittest.TestCase):
     def test_environment_variables_openai(self):
         """Test: Configure via environment variables: OPENAI_API_KEY"""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key-123'}):
-            config = Config(ai=AIConfig(provider='openai', model='gpt-4'))
+            config = Config(ai=AIConfig(provider='openai', model='gpt-4.1'))
             provider = UnifiedAIProvider(config)
             
             # Test that provider configuration is correct
             self.assertEqual(provider.provider_type, 'openai')
+            
+            # Test dynamic token management
+            params = provider._calculate_dynamic_params('test prompt')
+            self.assertIn('prompt_tokens', params)
+            self.assertIn('max_tokens', params)
+            self.assertIn('response_tokens', params)
             
             # Test that environment variable is read (by checking os.getenv behavior)
             key = os.getenv('OPENAI_API_KEY')
@@ -265,11 +271,17 @@ class TestAIProvidersExact(unittest.TestCase):
     def test_environment_variables_anthropic(self):
         """Test: Configure via environment variables: ANTHROPIC_API_KEY"""
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key-456'}):
-            config = Config(ai=AIConfig(provider='anthropic', model='claude-3-sonnet'))
+            config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4'))
             provider = UnifiedAIProvider(config)
             
             # Test that provider configuration is correct
             self.assertEqual(provider.provider_type, 'anthropic')
+            
+            # Test dynamic token management
+            params = provider._calculate_dynamic_params('test prompt')
+            self.assertIn('prompt_tokens', params)
+            self.assertIn('max_tokens', params)
+            self.assertIn('response_tokens', params)
             
             # Test that environment variable is read (by checking os.getenv behavior)
             key = os.getenv('ANTHROPIC_API_KEY')
@@ -388,7 +400,7 @@ class TestConfigurationExact(unittest.TestCase):
         """Test: YAML configuration matches documentation format exactly"""
         yaml_content = """ai:
   provider: local  # or openai, anthropic
-  model: devstral  # or gpt-4, claude-3-sonnet
+  model: devstral  # or gpt-4.1, claude-sonnet-4
   
 output:
   backup_branch: true"""
@@ -605,6 +617,78 @@ class TestCompleteWorkflowIntegration(unittest.TestCase):
         
         # Should have fewer commits now (squashed)
         self.assertLessEqual(int(final_commits), int(original_commits))
+
+
+class TestDynamicTokenManagement(unittest.TestCase):
+    """Test dynamic token management for all AI providers"""
+    
+    def setUp(self):
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+    
+    def test_token_estimation_accuracy(self):
+        """Test token estimation works consistently"""
+        short_text = "Hello world"
+        medium_text = "This is a medium length text " * 10
+        long_text = "This is a very long text " * 100
+        
+        short_tokens = self.provider._estimate_tokens(short_text)
+        medium_tokens = self.provider._estimate_tokens(medium_text)
+        long_tokens = self.provider._estimate_tokens(long_text)
+        
+        # Verify scaling relationship
+        self.assertGreater(medium_tokens, short_tokens)
+        self.assertGreater(long_tokens, medium_tokens)
+        
+        # Verify reasonable estimates (roughly 1 token per 4 chars)
+        self.assertAlmostEqual(short_tokens, len(short_text) // 4, delta=2)
+    
+    def test_dynamic_params_calculation(self):
+        """Test dynamic parameter calculation for all providers"""
+        small_prompt = "Small test prompt"
+        large_prompt = "Large test prompt " * 1000
+        
+        small_params = self.provider._calculate_dynamic_params(small_prompt)
+        large_params = self.provider._calculate_dynamic_params(large_prompt)
+        
+        # Verify structure
+        for params in [small_params, large_params]:
+            self.assertIn('prompt_tokens', params)
+            self.assertIn('max_tokens', params)
+            self.assertIn('response_tokens', params)
+            self.assertIn('context_needed', params)
+        
+        # Verify scaling
+        self.assertGreater(large_params['prompt_tokens'], small_params['prompt_tokens'])
+        self.assertGreater(large_params['max_tokens'], small_params['max_tokens'])
+        
+        # Verify caps are enforced
+        self.assertLessEqual(large_params['max_tokens'], self.provider.MAX_CONTEXT_TOKENS)
+        self.assertLessEqual(large_params['response_tokens'], self.provider.MAX_PREDICT_TOKENS)
+    
+    def test_ollama_params_backward_compatibility(self):
+        """Test Ollama-specific parameter calculation still works"""
+        prompt = "Test prompt for Ollama"
+        ollama_params = self.provider._calculate_ollama_params(prompt)
+        
+        self.assertIn('num_ctx', ollama_params)
+        self.assertIn('num_predict', ollama_params)
+        self.assertLessEqual(ollama_params['num_ctx'], self.provider.MAX_CONTEXT_TOKENS)
+        self.assertLessEqual(ollama_params['num_predict'], self.provider.MAX_PREDICT_TOKENS)
+    
+    def test_token_limits_enforced(self):
+        """Test that hard token limits are always enforced"""
+        massive_prompt = "Massive prompt " * 10000  # Way over limits
+        
+        params = self.provider._calculate_dynamic_params(massive_prompt)
+        ollama_params = self.provider._calculate_ollama_params(massive_prompt)
+        
+        # Should be capped at maximums
+        self.assertEqual(params['max_tokens'], self.provider.MAX_CONTEXT_TOKENS)
+        self.assertEqual(ollama_params['num_ctx'], self.provider.MAX_CONTEXT_TOKENS)
+        
+        # Response tokens should be reasonable
+        self.assertLessEqual(params['response_tokens'], self.provider.MAX_PREDICT_TOKENS)
+        self.assertLessEqual(ollama_params['num_predict'], self.provider.MAX_PREDICT_TOKENS)
 
 
 class TestErrorConditionsExact(unittest.TestCase):

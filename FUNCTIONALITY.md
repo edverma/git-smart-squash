@@ -90,8 +90,8 @@ git-smart-squash --base develop
 
 ### Using Specific AI Provider
 ```bash
-git-smart-squash --ai-provider openai --model gpt-4
-git-smart-squash --ai-provider anthropic --model claude-3-sonnet
+git-smart-squash --ai-provider openai --model gpt-4.1
+git-smart-squash --ai-provider anthropic --model claude-sonnet-4
 ```
 
 ## AI Providers
@@ -99,7 +99,7 @@ git-smart-squash --ai-provider anthropic --model claude-3-sonnet
 The tool supports multiple AI providers:
 
 - **Local AI** (default): Uses Ollama with devstral model
-- **OpenAI**: GPT-4, GPT-3.5-turbo
+- **OpenAI**: GPT-4.1
 - **Anthropic**: Claude models
 
 Configure via environment variables:
@@ -131,7 +131,7 @@ Minimal configuration in `~/.git-smart-squash.yml`:
 ```yaml
 ai:
   provider: local  # or openai, anthropic
-  model: devstral  # or gpt-4, claude-3-sonnet
+  model: devstral  # or gpt-4.1, claude-sonnet-4
   
 output:
   backup_branch: true

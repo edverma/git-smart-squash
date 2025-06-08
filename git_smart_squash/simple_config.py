@@ -26,6 +26,15 @@ class ConfigManager:
     def __init__(self):
         self.default_config_path = os.path.expanduser("~/.git-smart-squash.yml")
         
+    def _get_default_model(self, provider: str) -> str:
+        """Get the default model for a given provider."""
+        defaults = {
+            'local': 'devstral',
+            'openai': 'gpt-4.1',
+            'anthropic': 'claude-sonnet-4'
+        }
+        return defaults.get(provider, 'devstral')
+    
     def load_config(self, config_path: Optional[str] = None) -> Config:
         """Load configuration from file or create default."""
         
@@ -51,10 +60,17 @@ class ConfigManager:
                 except Exception:
                     continue
         
-        # Create config with defaults
+        # Create config with provider-aware defaults
+        provider = config_data.get('ai', {}).get('provider', 'local')
+        model = config_data.get('ai', {}).get('model')
+        
+        # If no model specified, use provider-specific default
+        if not model:
+            model = self._get_default_model(provider)
+        
         ai_config = AIConfig(
-            provider=config_data.get('ai', {}).get('provider', 'local'),
-            model=config_data.get('ai', {}).get('model', 'devstral'),
+            provider=provider,
+            model=model,
             api_key_env=config_data.get('ai', {}).get('api_key_env')
         )
         

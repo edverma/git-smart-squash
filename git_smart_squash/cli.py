@@ -33,6 +33,9 @@ class GitSmartSquashCLI:
             # Override config with command line arguments
             if args.ai_provider:
                 self.config.ai.provider = args.ai_provider
+                # If provider is changed but no model specified, use provider default
+                if not args.model:
+                    self.config.ai.model = self.config_manager._get_default_model(args.ai_provider)
             if args.model:
                 self.config.ai.model = args.model
             
