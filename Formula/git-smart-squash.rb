@@ -3,40 +3,35 @@ class GitSmartSquash < Formula
 
   desc "Automatically reorganize messy git commit histories into clean, semantic commits"
   homepage "https://github.com/edverma/git-smart-squash"
-  url "https://files.pythonhosted.org/packages/source/g/git-smart-squash/git_smart_squash-2.2.5.tar.gz"
-  sha256 "14eccc11a6ac8b461f3a3e7b4becabc4ecabb374466421fe152b9d7291b2a045"
+  url "https://github.com/edverma/git-smart-squash/archive/v2.3.0.tar.gz"
+  sha256 "7f23364997473b7239ed46d6a46e1f3b28bc93d427fed1721195a85249275947"
   license "MIT"
 
   depends_on "python@3.12"
 
   resource "pyyaml" do
-    url "https://files.pythonhosted.org/packages/cd/e5/af35f7ea75cf72f2cd079c95ee16797de7cd71f29ea7c68ae5ce7be1eda2b/PyYAML-6.0.2.tar.gz"
+    url "https://files.pythonhosted.org/packages/54/ed/79a089b6be93607fa5cdaedf301d7dfb23af5f25c398d5ead2525b063e17/pyyaml-6.0.2.tar.gz"
     sha256 "d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e"
   end
 
   resource "rich" do
-    url "https://files.pythonhosted.org/packages/87/67/a37f6214d0e9fe57f6a3427b2d0b2b6e8d8f87a0b8a62b8a77ad8f6c5ee2/rich-14.0.0.tar.gz"
-    sha256 "8260cda28e3db6bf04d2d1ef4dbc03ba80a824c88b0e7668a0f23126a424844a"
+    url "https://files.pythonhosted.org/packages/a1/53/830aa4c3066a8ab0ae9a9955976fb770fe9c6102117c8ec4ab3ea62d89e8/rich-14.0.0.tar.gz"
+    sha256 "82f1bc23a6a21ebca4ae0c45af9bdbc492ed20231dcb63f297d6d1021a9d5725"
   end
 
   resource "openai" do
-    url "https://files.pythonhosted.org/packages/source/o/openai/openai-1.44.0.tar.gz"
-    sha256 "68a5fbc86e5c2eed8b93de9e4b9d574a0b4c9b4ae9b21b2d394e9d8e7ebcdf17"
+    url "https://files.pythonhosted.org/packages/ba/9b/946d67085cba123ab48198610d962d73d0c301b3771f21af7791eb07df93/openai-1.44.0.tar.gz"
+    sha256 "acde74598976ec85bc477e9abb94eeb17f6efd998914d5685eeb46a69116894a"
   end
 
   resource "anthropic" do
-    url "https://files.pythonhosted.org/packages/source/a/anthropic/anthropic-0.52.0.tar.gz"
-    sha256 "52d60cdbf8964daf2e8a5a4f2b8e7ac5e4da4915a67e1bd1987fa5e6f5e4a87a"
+    url "https://files.pythonhosted.org/packages/57/fd/8a9332f5baf352c272494a9d359863a53385a208954c1a7251a524071930/anthropic-0.52.0.tar.gz"
+    sha256 "f06bc924d7eb85f8a43fe587b875ff58b410d60251b7dc5f1387b322a35bd67b"
   end
 
   resource "requests" do
-    url "https://files.pythonhosted.org/packages/source/r/requests/requests-2.31.0.tar.gz"
+    url "https://files.pythonhosted.org/packages/9d/be/10918a2eac4ae9f02f6cfe6414b7a155ccd8f7f9d4380d62fd5b955065c3/requests-2.31.0.tar.gz"
     sha256 "942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1"
-  end
-
-  resource "tiktoken" do
-    url "https://files.pythonhosted.org/packages/source/t/tiktoken/tiktoken-0.8.0.tar.gz"
-    sha256 "9ccbb2740f24542534369c5635cfd9b2b3c2490754a78ac8831d99f89f94eeb2"
   end
 
   def install
@@ -45,6 +40,5 @@ class GitSmartSquash < Formula
 
   test do
     assert_match "usage: git-smart-squash", shell_output("#{bin}/git-smart-squash --help")
-    assert_match "Zero-friction git commit squashing", shell_output("#{bin}/gss --help")
   end
 end

@@ -1,0 +1,45 @@
+package:
+  name: git-smart-squash
+  version: 2.3.0
+
+source:
+  url: https://pypi.io/packages/source/g/git-smart-squash/git-smart-squash-{{ version }}.tar.gz
+  sha256: # TODO: Add SHA256 from PyPI
+
+build:
+  number: 0
+  script: python -m pip install . -vv
+  entry_points:
+    - git-smart-squash = git_smart_squash.cli:main
+
+requirements:
+  host:
+    - python >=3.8
+    - pip
+  run:
+    - python >=3.8
+    - pyyaml >=6.0
+    - rich >=13.0.0
+    - openai >=1.0.0
+    - anthropic >=0.3.0
+    - requests >=2.28.0
+
+test:
+  imports:
+    - git_smart_squash
+  commands:
+    - git-smart-squash --help
+
+about:
+  home: https://github.com/edverma/git-smart-squash
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: Automatically reorganize messy git commit histories into clean, semantic commits
+  description: |
+    Git Smart Squash uses AI and heuristics to automatically group related commits
+    and generate meaningful commit messages following conventional commit standards.
+
+extra:
+  recipe-maintainers:
+    - edverma
