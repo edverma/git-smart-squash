@@ -10,7 +10,7 @@ from typing import Optional
 class UnifiedAIProvider:
     """Simplified unified AI provider."""
     
-    MAX_CONTEXT_TOKENS = 32000  # Default for Ollama
+    MAX_CONTEXT_TOKENS = 32000
     MAX_PREDICT_TOKENS = 12000
     
     # Schema for commit organization JSON structure  
@@ -92,9 +92,15 @@ class UnifiedAIProvider:
         if params["max_tokens"] > self.MAX_CONTEXT_TOKENS * 0.8:
             num_ctx = self.MAX_CONTEXT_TOKENS
         else:
-            # Use 15% safety margin since token estimation may be imperfect
-            min_context_needed = int(estimated_prompt_tokens * 1.15) + 1000  # 15% safety margin + response space
-            num_ctx = max(params["max_tokens"], min_context_needed)
+            # Use 30% safety margin since token estimation may be imperfect
+            # Add substantial response buffer to avoid truncation
+            safety_buffer = int(estimated_prompt_tokens * 0.30)  # 30% safety margin
+            response_buffer = max(1500, estimated_prompt_tokens // 4)  # At least 1500 tokens for response
+            min_context_needed = estimated_prompt_tokens + safety_buffer + response_buffer
+            
+            # Round up to nearest 512 to avoid edge cases and improve efficiency
+            num_ctx = ((min_context_needed + 511) // 512) * 512
+            
             # Respect absolute maximum
             num_ctx = min(num_ctx, self.MAX_CONTEXT_TOKENS)
         
