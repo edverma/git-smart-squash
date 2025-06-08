@@ -44,7 +44,7 @@ class UnifiedAIProvider:
         # More conservative estimation for code/diffs: 1 token ≈ 3 characters
         # This overestimates to ensure we don't truncate prompts
         # Code and technical content typically has higher token density
-        return max(1, len(text) // 3)
+        return max(1, int(len(text) // 3))
     
     def _calculate_dynamic_params(self, prompt: str) -> dict:
         """Calculate optimal token parameters based on prompt size for any provider."""
