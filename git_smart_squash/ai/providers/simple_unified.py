@@ -140,11 +140,11 @@ class UnifiedAIProvider:
             # Increase timeout for large contexts - be more generous for integration tests
             # Scale timeout based on context size to handle very large diffs
             if ollama_params["num_ctx"] > 20000:
-                timeout = 1200  # 20 minutes for very large contexts
+                timeout = 7200  # 120 minutes for very large contexts
             elif ollama_params["num_ctx"] > 8000:
-                timeout = 600   # 10 minutes for large contexts
+                timeout = 1800   # 30 minutes for large contexts
             else:
-                timeout = 300   # 5 minutes for normal contexts
+                timeout = 900   # 15 minutes for normal contexts
             
             result = subprocess.run([
                 "curl", "-s", "-X", "POST", "http://localhost:11434/api/generate",
