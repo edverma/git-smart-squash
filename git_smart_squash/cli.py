@@ -225,7 +225,7 @@ DIFF TO ANALYZE:
         """Get user confirmation to proceed."""
         self.console.print("\n[bold]Apply this commit structure?[/bold]")
         response = input("Continue? (y/N): ")
-        return response.lower() == 'y'
+        return response.lower().strip() == 'y'
     
     def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], base_branch: str):
         """Apply the commit plan by resetting and recreating commits."""

@@ -2,7 +2,7 @@
 
 import os
 import sys
-from .config import ConfigManager
+from .simple_config import ConfigManager
 
 
 def create_default_global_config():
@@ -10,13 +10,12 @@ def create_default_global_config():
     try:
         config_manager = ConfigManager()
         
-        # Check if any global config already exists
-        for path in config_manager.GLOBAL_CONFIG_PATHS:
-            if os.path.exists(path):
-                return  # Config already exists, don't overwrite
+        # Check if global config already exists
+        if os.path.exists(config_manager.default_config_path):
+            return  # Config already exists, don't overwrite
         
         # Create default global config
-        config_path = config_manager.create_global_config()
+        config_path = config_manager.create_default_config(global_config=True)
         print(f"Created default global config at: {config_path}")
         
     except Exception as e:

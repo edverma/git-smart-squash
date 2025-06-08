@@ -83,14 +83,20 @@ class UnifiedAIProvider:
         """Calculate optimal num_ctx and num_predict for Ollama based on prompt size."""
         params = self._calculate_dynamic_params(prompt)
         
-        # Ensure num_ctx is always sufficient for the actual prompt
-        # Use 15% safety margin since token estimation may be imperfect
+        # For large prompts, use the full context window to maximize capacity
+        # For smaller prompts, optimize for efficiency
         estimated_prompt_tokens = params["prompt_tokens"]
-        min_context_needed = int(estimated_prompt_tokens * 1.15) + 1000  # 15% safety margin + response space
         
-        num_ctx = max(params["max_tokens"], min_context_needed)
-        # Respect absolute maximum
-        num_ctx = min(num_ctx, self.MAX_CONTEXT_TOKENS)
+        # If the dynamic calculation already uses most of the context window,
+        # just use the maximum to avoid weird intermediate values
+        if params["max_tokens"] > self.MAX_CONTEXT_TOKENS * 0.8:
+            num_ctx = self.MAX_CONTEXT_TOKENS
+        else:
+            # Use 15% safety margin since token estimation may be imperfect
+            min_context_needed = int(estimated_prompt_tokens * 1.15) + 1000  # 15% safety margin + response space
+            num_ctx = max(params["max_tokens"], min_context_needed)
+            # Respect absolute maximum
+            num_ctx = min(num_ctx, self.MAX_CONTEXT_TOKENS)
         
         return {
             "num_ctx": num_ctx,
@@ -132,7 +138,13 @@ class UnifiedAIProvider:
             }
             
             # Increase timeout for large contexts - be more generous for integration tests
-            timeout = 600 if ollama_params["num_ctx"] > 8000 else 300
+            # Scale timeout based on context size to handle very large diffs
+            if ollama_params["num_ctx"] > 20000:
+                timeout = 1200  # 20 minutes for very large contexts
+            elif ollama_params["num_ctx"] > 8000:
+                timeout = 600   # 10 minutes for large contexts
+            else:
+                timeout = 300   # 5 minutes for normal contexts
             
             result = subprocess.run([
                 "curl", "-s", "-X", "POST", "http://localhost:11434/api/generate",
@@ -141,7 +153,10 @@ class UnifiedAIProvider:
             ], capture_output=True, text=True, timeout=timeout)
             
             if result.returncode != 0:
-                raise Exception(f"Ollama request failed: {result.stderr}")
+                if result.returncode == 7:
+                    raise Exception("Ollama request failed: Could not connect to Ollama server at localhost:11434. Please ensure Ollama is running.")
+                else:
+                    raise Exception(f"Ollama request failed: {result.stderr}")
             
             response = json.loads(result.stdout)
             

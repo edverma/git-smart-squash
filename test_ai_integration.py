@@ -25,7 +25,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from git_smart_squash.cli import GitSmartSquashCLI
-from git_smart_squash.simple_config import Config, AIConfig
+from git_smart_squash.simple_config import Config, AIConfig, ConfigManager
 from git_smart_squash.ai.providers.simple_unified import UnifiedAIProvider
 
 
@@ -285,7 +285,7 @@ Here's the diff to analyze:
                         
                         # Verify conventional commit format
                         message = commit['message']
-                        self.assertRegex(message, r'^[a-z]+: .+', "Should follow conventional commit format")
+                        self.assertRegex(message, r'^[a-z]+(\([^)]+\))?: .+', "Should follow conventional commit format")
                         
                 except Exception as e:
                     if 'api key' in str(e).lower() or 'not installed' in str(e).lower():

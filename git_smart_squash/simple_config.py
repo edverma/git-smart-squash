@@ -76,7 +76,7 @@ class ConfigManager:
         
         return Config(ai=ai_config)
     
-    def create_default_config(self) -> str:
+    def create_default_config(self, global_config: bool = False) -> str:
         """Create a default config file."""
         config = {
             'ai': {
@@ -86,7 +86,11 @@ class ConfigManager:
             }
         }
         
-        path = ".git-smart-squash.yml"
+        if global_config:
+            path = self.default_config_path
+        else:
+            path = ".git-smart-squash.yml"
+            
         with open(path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False)
         
