@@ -19,7 +19,7 @@ import sys
 import tempfile
 import shutil
 import time
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 # Add the package to the path for testing
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -273,26 +273,19 @@ Here's the diff to analyze:
                     self.assertIsNotNone(response)
                     self.assertGreater(len(response), 0)
                     
-                    # Try to parse as JSON
-                    try:
-                        parsed = json.loads(response)
-                        self.assertIsInstance(parsed, list, "Response should be a JSON array")
+                    # With structured output, response should always be valid JSON
+                    parsed = json.loads(response)
+                    self.assertIsInstance(parsed, list, "Response should be a JSON array")
+                    
+                    if len(parsed) > 0:
+                        commit = parsed[0]
+                        self.assertIn('message', commit, "Commit should have message field")
+                        self.assertIn('files', commit, "Commit should have files field")
+                        self.assertIn('rationale', commit, "Commit should have rationale field")
                         
-                        if len(parsed) > 0:
-                            commit = parsed[0]
-                            self.assertIn('message', commit, "Commit should have message field")
-                            self.assertIn('files', commit, "Commit should have files field")
-                            self.assertIn('rationale', commit, "Commit should have rationale field")
-                            
-                            # Verify conventional commit format
-                            message = commit['message']
-                            self.assertRegex(message, r'^[a-z]+: .+', "Should follow conventional commit format")
-                            
-                    except json.JSONDecodeError:
-                        # If JSON parsing fails, check if response contains structured information
-                        self.assertIn('auth', response.lower(), "Response should mention authentication")
-                        self.assertIn('test', response.lower(), "Response should mention tests")
-                        print(f"{provider_name} non-JSON response received: {response[:500]}...")
+                        # Verify conventional commit format
+                        message = commit['message']
+                        self.assertRegex(message, r'^[a-z]+: .+', "Should follow conventional commit format")
                         
                 except Exception as e:
                     if 'api key' in str(e).lower() or 'not installed' in str(e).lower():
@@ -451,9 +444,9 @@ Here's the diff to analyze:
 
     def test_large_diff_token_handling_all_providers(self):
         """Test handling of large diffs that approach token limits across all providers."""
-        # Create a very large diff
+        # Create a large diff that approaches but doesn't exceed 30k tokens
         large_diff_lines = []
-        for i in range(200):  # Generate many file changes
+        for i in range(80):  # Generate many file changes (reduced from 200 to 80)
             large_diff_lines.extend([
                 f"diff --git a/src/file{i}.py b/src/file{i}.py",
                 "new file mode 100644",
@@ -493,9 +486,9 @@ Here's the diff:
         params = sample_provider._calculate_dynamic_params(prompt)
         print(f"Calculated params: {params}")
         
-        # Verify we hit the token limits
-        if estimated_tokens > 10000:
-            self.assertEqual(params['max_tokens'], sample_provider.MAX_CONTEXT_TOKENS)
+        # Verify we approach but don't exceed token limits (should be under 30k)
+        self.assertLess(estimated_tokens, 30000, "Test diff should be under 30k tokens")
+        self.assertGreater(estimated_tokens, 15000, "Test diff should be substantial (over 15k tokens)")
         
         available_providers = self._get_available_providers()
         if not available_providers:
@@ -729,6 +722,103 @@ def test_authenticate_failure():
                         self.skipTest(f"{provider_name} analysis timed out: {e}")
                     else:
                         self.fail(f"{provider_name} AI analysis failed: {e}")
+
+
+class TestStructuredOutputValidation(unittest.TestCase):
+    """Test structured output validation with real API responses"""
+    
+    def setUp(self):
+        self.providers = {
+            'local': Config(ai=AIConfig(provider='local', model='devstral')),
+            'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+        }
+    
+    def _get_available_providers(self):
+        available = []
+        # Check Ollama
+        try:
+            result = subprocess.run([
+                "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
+            ], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                available.append('local')
+        except:
+            pass
+        # Check API keys
+        if os.getenv('OPENAI_API_KEY'):
+            available.append('openai')
+        if os.getenv('ANTHROPIC_API_KEY'):
+            available.append('anthropic')
+        return available
+    
+    def test_json_schema_enforcement(self):
+        """Test that all providers strictly enforce JSON schema"""
+        available_providers = self._get_available_providers()
+        if not available_providers:
+            self.skipTest("No AI providers available")
+        
+        test_prompt = "Organize authentication changes: auth.py and test_auth.py"
+        
+        for provider_name in available_providers:
+            with self.subTest(provider=provider_name):
+                config = self.providers[provider_name]
+                provider = UnifiedAIProvider(config)
+                
+                try:
+                    if provider_name == 'local':
+                        response = provider._generate_local(test_prompt)
+                    elif provider_name == 'openai':
+                        response = provider._generate_openai(test_prompt)
+                    elif provider_name == 'anthropic':
+                        response = provider._generate_anthropic(test_prompt)
+                    
+                    # Must be valid JSON array
+                    parsed = json.loads(response)
+                    self.assertIsInstance(parsed, list)
+                    
+                    # Validate each commit structure
+                    for commit in parsed:
+                        self.assertIn('message', commit)
+                        self.assertIn('files', commit)
+                        self.assertIn('rationale', commit)
+                        self.assertIsInstance(commit['files'], list)
+                        self.assertIsInstance(commit['message'], str)
+                        self.assertIsInstance(commit['rationale'], str)
+                    
+                except Exception as e:
+                    if 'api key' in str(e).lower() or 'not installed' in str(e).lower():
+                        self.skipTest(f"{provider_name} not configured: {e}")
+                    else:
+                        self.fail(f"{provider_name} schema enforcement failed: {e}")
+
+
+class TestErrorHandlingEdgeCases(unittest.TestCase):
+    """Test edge cases and error handling scenarios"""
+    
+    def test_malformed_response_handling(self):
+        """Test handling of malformed responses"""
+        provider = UnifiedAIProvider(Config(ai=AIConfig(provider='local')))
+        
+        malformed_cases = [
+            '{"commits": [',  # Incomplete JSON
+            'plain text',      # Non-JSON response
+            '{"wrong_field": []}',  # Wrong schema
+        ]
+        
+        for malformed in malformed_cases:
+            with patch('subprocess.run') as mock_run:
+                mock_response = {'response': malformed, 'done': True}
+                mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_response))
+                
+                # Should handle gracefully
+                try:
+                    result = provider._generate_local("test")
+                    # Result should be a string for fallback processing
+                    self.assertIsInstance(result, str)
+                except Exception as e:
+                    # Should not crash unexpectedly
+                    self.assertIn('JSON', str(e))  # Should be JSON-related error
 
 
 if __name__ == '__main__':

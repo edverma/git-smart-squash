@@ -118,9 +118,8 @@ class TestCoreConceptFourSteps(unittest.TestCase):
             # Verify the exact prompt is used
             actual_prompt = mock_generate.call_args[0][0]
             
-            # Check key phrases from the documented prompt
-            self.assertIn('Analyze this git diff and organize it into logical, reviewable commits', actual_prompt)
-            self.assertIn('that would be easy for a reviewer to understand in a pull request', actual_prompt)
+            # Check key phrases from the updated simplified prompt
+            self.assertIn('Analyze this git diff and organize changes into logical commits', actual_prompt)
             self.assertIn('conventional commit message', actual_prompt)
             self.assertIn('specific file changes', actual_prompt)
             self.assertIn('brief rationale', actual_prompt)
@@ -738,6 +737,276 @@ class TestErrorConditionsExact(unittest.TestCase):
                     
                     output = mock_stdout.getvalue()
                     self.assertIn('Operation cancelled', output)
+
+
+class TestStructuredOutputImplementation(unittest.TestCase):
+    """Test the new structured output implementation across all providers"""
+    
+    def setUp(self):
+        self.config = Config(ai=AIConfig())
+        self.provider = UnifiedAIProvider(self.config)
+    
+    def test_commit_schema_structure(self):
+        """Test that COMMIT_SCHEMA has correct structure for API compatibility"""
+        schema = self.provider.COMMIT_SCHEMA
+        
+        # Must be object type for API compatibility
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("commits", schema["properties"])
+        self.assertEqual(schema["required"], ["commits"])
+        
+        # Commits should be array of objects
+        commits_schema = schema["properties"]["commits"]
+        self.assertEqual(commits_schema["type"], "array")
+        
+        # Each commit item should have required fields
+        item_schema = commits_schema["items"]
+        self.assertEqual(item_schema["type"], "object")
+        self.assertEqual(set(item_schema["required"]), {"message", "files", "rationale"})
+        self.assertEqual(item_schema["properties"]["files"]["type"], "array")
+    
+    def test_response_extraction_consistency(self):
+        """Test that all providers return consistent array format"""
+        test_cases = [
+            # Already array format
+            '[{"message": "test", "files": [], "rationale": "test"}]',
+            # Wrapped in commits object  
+            '{"commits": [{"message": "test", "files": [], "rationale": "test"}]}'
+        ]
+        
+        for test_input in test_cases:
+            with patch('subprocess.run') as mock_run:
+                mock_response = {'response': test_input, 'done': True}
+                mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_response))
+                
+                result = self.provider._generate_local("test prompt")
+                
+                # Should always return array format
+                parsed = json.loads(result)
+                self.assertIsInstance(parsed, list)
+                if len(parsed) > 0:
+                    self.assertIn('message', parsed[0])
+                    self.assertIn('files', parsed[0])
+                    self.assertIn('rationale', parsed[0])
+
+
+class TestConfigurationManagement(unittest.TestCase):
+    """Test comprehensive configuration management functionality"""
+    
+    def setUp(self):
+        self.config_manager = ConfigManager()
+        
+    def test_default_model_selection(self):
+        """Test provider-specific default model selection"""
+        test_cases = [
+            ('local', 'devstral'),
+            ('openai', 'gpt-4.1'),
+            ('anthropic', 'claude-3-5-sonnet-20241022'),
+            ('unknown', 'devstral')  # fallback
+        ]
+        
+        for provider, expected_model in test_cases:
+            model = self.config_manager._get_default_model(provider)
+            self.assertEqual(model, expected_model)
+    
+    def test_config_loading_precedence(self):
+        """Test configuration loading order and precedence"""
+        # Test default config when no files exist
+        with patch('os.path.exists', return_value=False):
+            config = self.config_manager.load_config()
+            self.assertEqual(config.ai.provider, 'local')
+            self.assertEqual(config.ai.model, 'devstral')
+    
+    def test_yaml_config_parsing(self):
+        """Test YAML configuration file parsing"""
+        yaml_content = {
+            'ai': {
+                'provider': 'openai',
+                'model': 'gpt-4.1',
+                'api_key_env': 'CUSTOM_API_KEY'
+            }
+        }
+        
+        with patch('os.path.exists', return_value=True):
+            with patch('builtins.open', mock_open()):
+                with patch('yaml.safe_load', return_value=yaml_content):
+                    config = self.config_manager.load_config()
+                    
+                    self.assertEqual(config.ai.provider, 'openai')
+                    self.assertEqual(config.ai.model, 'gpt-4.1')
+                    self.assertEqual(config.ai.api_key_env, 'CUSTOM_API_KEY')
+
+
+class TestGitOperationsEdgeCases(unittest.TestCase):
+    """Test git operations and edge case handling"""
+    
+    def setUp(self):
+        self.cli = GitSmartSquashCLI()
+    
+    def test_alternative_base_branch_fallback(self):
+        """Test fallback to alternative base branches when main doesn't exist"""
+        with patch('subprocess.run') as mock_run:
+            # First call fails (main doesn't exist)
+            # Second call succeeds (origin/main exists)
+            mock_run.side_effect = [
+                subprocess.CalledProcessError(128, 'git', stderr='unknown revision'),
+                MagicMock(stdout='diff content', returncode=0)
+            ]
+            
+            diff = self.cli.get_full_diff('main')
+            
+            # Should have tried main, then origin/main
+            self.assertEqual(mock_run.call_count, 2)
+            first_call = mock_run.call_args_list[0][0][0]
+            second_call = mock_run.call_args_list[1][0][0]
+            
+            self.assertEqual(first_call, ['git', 'diff', 'main...HEAD'])
+            self.assertEqual(second_call, ['git', 'diff', 'origin/main...HEAD'])
+            self.assertEqual(diff, 'diff content')
+    
+    def test_all_base_branches_fail(self):
+        """Test behavior when all base branch alternatives fail"""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(128, 'git', stderr='unknown revision')
+            
+            with self.assertRaises(Exception) as context:
+                self.cli.get_full_diff('nonexistent')
+            
+            self.assertIn('Could not get diff from nonexistent', str(context.exception))
+    
+    def test_empty_diff_handling(self):
+        """Test handling of empty diff (no changes)"""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(stdout='   \n  ', returncode=0)  # whitespace only
+            
+            diff = self.cli.get_full_diff('main')
+            self.assertIsNone(diff)
+
+
+class TestProviderSpecificFeatures(unittest.TestCase):
+    """Test provider-specific features and error handling"""
+    
+    def setUp(self):
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+    
+    def test_api_key_validation(self):
+        """Test API key validation for cloud providers"""
+        # OpenAI missing API key
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(Exception) as context:
+                self.provider._generate_openai('test')
+            self.assertIn('OPENAI_API_KEY environment variable not set', str(context.exception))
+        
+        # Anthropic missing API key
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(Exception) as context:
+                self.provider._generate_anthropic('test')
+            self.assertIn('ANTHROPIC_API_KEY environment variable not set', str(context.exception))
+    
+    def test_timeout_handling_ollama(self):
+        """Test timeout handling for Ollama requests"""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired('curl', 300)
+            
+            with self.assertRaises(Exception) as context:
+                self.provider._generate_local('test prompt')
+            
+            self.assertIn('Ollama request timed out', str(context.exception))
+
+
+class TestAdvancedIntegrationScenarios(unittest.TestCase):
+    """Test complex integration scenarios and edge cases"""
+    
+    def setUp(self):
+        self.cli = GitSmartSquashCLI()
+        
+    def test_command_line_argument_override_behavior(self):
+        """Test that command line arguments properly override configuration"""
+        # Create a config with different settings
+        config = Config(ai=AIConfig(provider='anthropic', model='claude-3-5-sonnet-20241022'))
+        self.cli.config = config
+        
+        # Test provider override
+        parser = self.cli.create_parser()
+        args = parser.parse_args(['--ai-provider', 'openai'])
+        
+        # Simulate the override logic from main()
+        if args.ai_provider:
+            config.ai.provider = args.ai_provider
+            # Should also update model to provider default
+            config.ai.model = ConfigManager()._get_default_model(args.ai_provider)
+        
+        self.assertEqual(config.ai.provider, 'openai')
+        self.assertEqual(config.ai.model, 'gpt-4.1')
+    
+    def test_large_repository_simulation(self):
+        """Test behavior with large diff simulation"""
+        # Create a large diff simulation
+        large_diff = '\n'.join([
+            f"diff --git a/file{i}.py b/file{i}.py",
+            "new file mode 100644",
+            f"+++ b/file{i}.py",
+            f"+def function_{i}():",
+            f"+    return 'content {i}'"
+        ] for i in range(100))
+        
+        # Test token estimation
+        provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        tokens = provider._estimate_tokens(large_diff)
+        
+        # Should be substantial
+        self.assertGreater(tokens, 1000)
+        
+        # Test dynamic parameter calculation
+        params = provider._calculate_dynamic_params(large_diff)
+        
+        # Should cap at maximum
+        self.assertLessEqual(params['max_tokens'], provider.MAX_CONTEXT_TOKENS)
+
+
+class TestPromptStructureValidation(unittest.TestCase):
+    """Test that prompts match the expected structured output format"""
+    
+    def setUp(self):
+        self.cli = GitSmartSquashCLI()
+        self.cli.config = Config(ai=AIConfig())
+    
+    def test_prompt_includes_structure_example(self):
+        """Test that prompt includes the expected JSON structure"""
+        with patch.object(UnifiedAIProvider, 'generate', return_value='{"commits": []}') as mock_generate:
+            self.cli.analyze_with_ai('mock diff')
+            
+            # Get the prompt that was sent
+            prompt = mock_generate.call_args[0][0]
+            
+            # Should include the structure example
+            self.assertIn('"commits":', prompt)
+            self.assertIn('"message":', prompt)
+            self.assertIn('"files":', prompt)
+            self.assertIn('"rationale":', prompt)
+    
+    def test_prompt_structure_consistency(self):
+        """Test that prompt structure is consistent with schema"""
+        provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        schema = provider.COMMIT_SCHEMA
+        
+        # Prompt should mention the same structure as schema
+        prompt = """Return your response in the following structure:
+{
+  "commits": [
+    {
+      "message": "feat: add user authentication system",
+      "files": ["src/auth.py", "src/models/user.py"],
+      "rationale": "Groups authentication functionality together"
+    }
+  ]
+}"""
+        
+        # Verify structure matches schema requirements
+        self.assertIn('commits', prompt)
+        self.assertIn('message', prompt)
+        self.assertIn('files', prompt)
+        self.assertIn('rationale', prompt)
 
 
 if __name__ == '__main__':

@@ -10,30 +10,67 @@ from typing import Optional
 class UnifiedAIProvider:
     """Simplified unified AI provider."""
     
-    MAX_CONTEXT_TOKENS = 12000
+    MAX_CONTEXT_TOKENS = 32000  # Default for Ollama
     MAX_PREDICT_TOKENS = 12000
+    
+    # Schema for commit organization JSON structure  
+    COMMIT_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "commits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "message": {"type": "string"},
+                        "files": {"type": "array", "items": {"type": "string"}},
+                        "rationale": {"type": "string"}
+                    },
+                    "required": ["message", "files", "rationale"],
+                    "additionalProperties": False
+                }
+            }
+        },
+        "required": ["commits"],
+        "additionalProperties": False
+    }
     
     def __init__(self, config):
         self.config = config
         self.provider_type = config.ai.provider.lower()
     
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count using simple heuristics."""
-        # Rough estimation: 1 token ≈ 4 characters for English text
-        # This is conservative and works reasonably well for most models
-        return max(1, len(text) // 4)
+        """Estimate token count using conservative heuristics."""
+        # More conservative estimation for code/diffs: 1 token ≈ 3 characters
+        # This overestimates to ensure we don't truncate prompts
+        # Code and technical content typically has higher token density
+        return max(1, len(text) // 3)
     
     def _calculate_dynamic_params(self, prompt: str) -> dict:
         """Calculate optimal token parameters based on prompt size for any provider."""
         prompt_tokens = self._estimate_tokens(prompt)
         
-        # Set context size based on prompt length, with safety margin
-        context_needed = prompt_tokens + 1000  # Extra buffer for response
+        # Check if prompt exceeds our maximum supported context
+        if prompt_tokens > self.MAX_CONTEXT_TOKENS - 2000:  # Reserve 2000 for response
+            raise Exception(f"Diff is too large ({prompt_tokens} tokens). Maximum supported: {self.MAX_CONTEXT_TOKENS - 2000} tokens. Consider breaking down your changes into smaller commits.")
+        
+        # Ensure context window is always sufficient for prompt + substantial response buffer
+        # Use larger buffer for complex tasks and be more conservative
+        response_buffer = max(2000, prompt_tokens // 4)  # Scale buffer with prompt size
+        context_needed = prompt_tokens + response_buffer
+        
+        # Ensure we never exceed hard limits but always accommodate the full prompt
         max_tokens = min(context_needed, self.MAX_CONTEXT_TOKENS)
         
+        # If context_needed exceeds MAX_CONTEXT_TOKENS, we must fit within limits
+        # but ensure response space is reasonable
+        if context_needed > self.MAX_CONTEXT_TOKENS:
+            # Reserve at least 1000 tokens for response, use rest for prompt
+            max_tokens = self.MAX_CONTEXT_TOKENS
+            response_buffer = min(response_buffer, 1000)
+        
         # Set prediction tokens based on expected response size
-        # For commit organization, we expect structured JSON responses
-        response_tokens = min(2000, self.MAX_PREDICT_TOKENS)
+        response_tokens = min(response_buffer, self.MAX_PREDICT_TOKENS)
         
         return {
             "prompt_tokens": prompt_tokens,
@@ -46,8 +83,17 @@ class UnifiedAIProvider:
         """Calculate optimal num_ctx and num_predict for Ollama based on prompt size."""
         params = self._calculate_dynamic_params(prompt)
         
+        # Ensure num_ctx is always sufficient for the actual prompt
+        # Use 15% safety margin since token estimation may be imperfect
+        estimated_prompt_tokens = params["prompt_tokens"]
+        min_context_needed = int(estimated_prompt_tokens * 1.15) + 1000  # 15% safety margin + response space
+        
+        num_ctx = max(params["max_tokens"], min_context_needed)
+        # Respect absolute maximum
+        num_ctx = min(num_ctx, self.MAX_CONTEXT_TOKENS)
+        
         return {
-            "num_ctx": params["max_tokens"],
+            "num_ctx": num_ctx,
             "num_predict": params["response_tokens"]
         }
         
@@ -64,7 +110,7 @@ class UnifiedAIProvider:
             raise ValueError(f"Unsupported provider: {self.provider_type}")
     
     def _generate_local(self, prompt: str) -> str:
-        """Generate using local Ollama with proper token limits."""
+        """Generate using local Ollama with structured output enforcement."""
         try:
             # Calculate optimal parameters based on prompt size
             ollama_params = self._calculate_ollama_params(prompt)
@@ -73,12 +119,15 @@ class UnifiedAIProvider:
                 "model": self.config.ai.model,
                 "prompt": prompt,
                 "stream": False,
+                "format": self.COMMIT_SCHEMA,  # Enforce JSON structure
                 "options": {
                     "num_ctx": ollama_params["num_ctx"],
                     "num_predict": ollama_params["num_predict"],
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                    "top_k": 40
+                    "temperature": 0.1,  # Lower temperature for more structured output
+                    "top_p": 0.95,       # Higher top_p for better instruction following
+                    "top_k": 20,         # Lower top_k for more focused responses
+                    "repeat_penalty": 1.1,  # Prevent repetitive explanations
+                    "stop": ["\n\nHuman:", "User:", "Assistant:", "Note:"]  # Stop conversational patterns
                 }
             }
             
@@ -101,7 +150,16 @@ class UnifiedAIProvider:
             if response.get('done', True) is False:
                 print(f"Warning: Response may have been truncated. Used {ollama_params['num_ctx']} context tokens.")
             
-            return response_text
+            # For Ollama with format parameter, response should already be the commits array
+            # But if it's wrapped in an object, extract the commits
+            try:
+                parsed = json.loads(response_text)
+                if isinstance(parsed, dict) and "commits" in parsed:
+                    return json.dumps(parsed["commits"])
+                else:
+                    return response_text  # Already in array format
+            except json.JSONDecodeError:
+                return response_text  # Return as-is if not JSON
             
         except subprocess.TimeoutExpired:
             raise Exception(f"Ollama request timed out after {timeout} seconds. Try reducing diff size or using a faster model.")
@@ -111,7 +169,7 @@ class UnifiedAIProvider:
             raise Exception(f"Local AI generation failed: {e}")
     
     def _generate_openai(self, prompt: str) -> str:
-        """Generate using OpenAI API with dynamic token management."""
+        """Generate using OpenAI API with structured output enforcement."""
         try:
             import openai
             
@@ -122,27 +180,57 @@ class UnifiedAIProvider:
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
             
-            # Warn if prompt is very large
-            if params["prompt_tokens"] > 10000:
-                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens). Response may be truncated.")
+            # OpenAI context limits vary by model
+            model_limits = {
+                'gpt-4': 8192,
+                'gpt-4-turbo': 128000, 
+                'gpt-4.1': 128000,  # Assuming this is a turbo variant
+                'gpt-3.5-turbo': 16385
+            }
+            
+            # Get context limit for current model, default to conservative limit
+            model_context_limit = model_limits.get(self.config.ai.model, 8192)
+            
+            # Check if prompt exceeds model context limit
+            if params["prompt_tokens"] > model_context_limit - 1000:  # Reserve 1000 for response
+                raise Exception(f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size.")
+            
+            # Warn if prompt is large but manageable
+            if params["prompt_tokens"] > model_context_limit * 0.7:
+                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
             client = openai.OpenAI(api_key=api_key)
             
-            # Use dynamic max_tokens, capped at API limits
-            max_tokens = min(params["response_tokens"], 4096)  # OpenAI API limit for responses
+            # Use dynamic max_tokens, ensuring total doesn't exceed context limit
+            max_response_tokens = min(
+                params["response_tokens"], 
+                4096,  # OpenAI API limit for responses
+                model_context_limit - params["prompt_tokens"] - 100  # Safety buffer
+            )
             
             response = client.chat.completions.create(
                 model=self.config.ai.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=0.7
+                max_tokens=max_response_tokens,
+                temperature=0.7,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "commit_plan",
+                        "schema": self.COMMIT_SCHEMA,
+                        "strict": True
+                    }
+                }
             )
             
             # Check if response was truncated
             if response.choices[0].finish_reason == "length":
-                print(f"Warning: OpenAI response truncated at {max_tokens} tokens. Consider reducing diff size.")
+                print(f"Warning: OpenAI response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
             
-            return response.choices[0].message.content
+            # Extract commits array from structured response
+            content = response.choices[0].message.content
+            parsed = json.loads(content)
+            return json.dumps(parsed.get("commits", []))
             
         except ImportError:
             raise Exception("OpenAI library not installed. Run: pip install openai")
@@ -150,7 +238,7 @@ class UnifiedAIProvider:
             raise Exception(f"OpenAI generation failed: {e}")
     
     def _generate_anthropic(self, prompt: str) -> str:
-        """Generate using Anthropic API with dynamic token management."""
+        """Generate using Anthropic API with structured output enforcement."""
         try:
             import anthropic
             
@@ -161,26 +249,61 @@ class UnifiedAIProvider:
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
             
-            # Warn if prompt is very large
-            if params["prompt_tokens"] > 150000:  # Claude's context limit is ~200k tokens
-                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens). May approach Claude's context limit.")
+            # Anthropic context limits vary by model
+            model_limits = {
+                'claude-3-5-sonnet-20241022': 200000,
+                'claude-sonnet-4-20250514': 200000,  # Assuming similar to Claude 3.5
+                'claude-3-haiku': 200000,
+                'claude-3-opus': 200000
+            }
+            
+            # Get context limit for current model, default to 200k
+            model_context_limit = model_limits.get(self.config.ai.model, 200000)
+            
+            # Check if prompt exceeds model context limit
+            if params["prompt_tokens"] > model_context_limit - 4000:  # Reserve 4000 for response
+                raise Exception(f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size.")
+            
+            # Warn if prompt is large but manageable
+            if params["prompt_tokens"] > model_context_limit * 0.8:
+                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
             client = anthropic.Anthropic(api_key=api_key)
             
-            # Use dynamic max_tokens, capped at API limits
-            max_tokens = min(params["response_tokens"], 4096)  # Claude API limit for responses
+            # Use dynamic max_tokens, ensuring total doesn't exceed context limit
+            max_response_tokens = min(
+                params["response_tokens"], 
+                4096,  # Claude API limit for responses
+                model_context_limit - params["prompt_tokens"] - 1000  # Safety buffer
+            )
+            
+            # Use tool-based structured output for reliable JSON
+            tools = [{
+                "name": "commit_organizer",
+                "description": "Organize git commits into structured format",
+                "input_schema": self.COMMIT_SCHEMA
+            }]
             
             response = client.messages.create(
                 model=self.config.ai.model,
-                max_tokens=max_tokens,
+                max_tokens=max_response_tokens,
+                tools=tools,
+                tool_choice={"type": "tool", "name": "commit_organizer"},
                 messages=[{"role": "user", "content": prompt}]
             )
             
-            # Check if response was truncated
-            if response.stop_reason == "max_tokens":
-                print(f"Warning: Anthropic response truncated at {max_tokens} tokens. Consider reducing diff size.")
+            # Extract structured data from tool use
+            for content in response.content:
+                if content.type == "tool_use" and content.name == "commit_organizer":
+                    # Extract commits array from the structured response
+                    structured_data = content.input
+                    return json.dumps(structured_data.get("commits", []))
             
-            return response.content[0].text
+            # Fallback if no tool use found
+            if response.content and response.content[0].type == "text":
+                return response.content[0].text
+            
+            raise Exception("No valid response content found")
             
         except ImportError:
             raise Exception("Anthropic library not installed. Run: pip install anthropic")

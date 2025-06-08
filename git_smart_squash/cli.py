@@ -160,70 +160,41 @@ class GitSmartSquashCLI:
         try:
             ai_provider = UnifiedAIProvider(self.config)
             
-            prompt = f"""
-            Analyze this git diff and organize it into logical, reviewable commits that would be easy for a reviewer to understand in a pull request.
+            prompt = f"""Analyze this git diff and organize changes into logical commits for pull request review.
 
-            For each commit, provide:
-            1. A conventional commit message (type: description)
-            2. The specific file changes that should be included
-            3. A brief rationale for why these changes belong together
+For each commit, provide:
+1. A conventional commit message (type: description)
+2. The specific file changes that should be included
+3. A brief rationale for why these changes belong together
 
-            Respond with a JSON array where each commit has this structure:
-            {{
-                "message": "feat: add user authentication system",
-                "files": ["src/auth.py", "src/models/user.py"],
-                "rationale": "Groups all authentication-related changes together"
-            }}
+Return your response in the following structure:
+{{
+  "commits": [
+    {{
+      "message": "feat: add user authentication system",
+      "files": ["src/auth.py", "src/models/user.py"],
+      "rationale": "Groups authentication functionality together"
+    }}
+  ]
+}}
 
-            Here's the diff to analyze:
+If the diff is very large, provide best-effort organization with logical groupings.
 
-            {diff}
-            """
+DIFF TO ANALYZE:
+{diff}"""
             
             response = ai_provider.generate(prompt)
             
-            # Try to extract JSON from the response
-            try:
-                # Look for JSON array in the response
-                start = response.find('[')
-                end = response.rfind(']') + 1
-                if start >= 0 and end > start:
-                    json_str = response[start:end]
-                    return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
-                
-            # If JSON parsing failed, try to parse a simpler format
-            return self.parse_ai_response_fallback(response)
+            # With structured output, response should always be valid JSON
+            return json.loads(response)
             
+        except json.JSONDecodeError as e:
+            self.console.print(f"[red]AI returned invalid JSON: {e}[/red]")
+            return None
         except Exception as e:
             self.console.print(f"[red]AI analysis failed: {e}[/red]")
             return None
     
-    def parse_ai_response_fallback(self, response: str) -> List[Dict[str, Any]]:
-        """Fallback parser for AI responses that aren't valid JSON."""
-        commits = []
-        lines = response.split('\n')
-        current_commit = None
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith('- ') or line.startswith('1.') or line.startswith('2.'):
-                # This looks like a commit message
-                if current_commit:
-                    commits.append(current_commit)
-                
-                message = line.split(': ', 1)[-1] if ': ' in line else line[2:]
-                current_commit = {
-                    "message": message,
-                    "files": [],
-                    "rationale": "AI-suggested grouping"
-                }
-        
-        if current_commit:
-            commits.append(current_commit)
-            
-        return commits if commits else [{"message": "refactor: reorganize changes", "files": [], "rationale": "Single commit"}]
     
     def display_commit_plan(self, commit_plan: List[Dict[str, Any]]):
         """Display the proposed commit plan."""
