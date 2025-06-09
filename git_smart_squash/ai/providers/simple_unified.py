@@ -4,6 +4,7 @@ import os
 import subprocess
 import json
 import re
+import google.generativeai as genai
 from typing import Optional
 
 
@@ -11,7 +12,7 @@ class UnifiedAIProvider:
     """Simplified unified AI provider."""
     
     MAX_CONTEXT_TOKENS = 32000
-    MAX_PREDICT_TOKENS = 12000
+    MAX_PREDICT_TOKENS = 32000
     
     # Schema for commit organization JSON structure  
     COMMIT_SCHEMA = {
@@ -240,7 +241,7 @@ class UnifiedAIProvider:
             # Use dynamic max_tokens, ensuring total doesn't exceed context limit
             max_response_tokens = min(
                 params["response_tokens"], 
-                4096,  # OpenAI API limit for responses
+                self.MAX_PREDICT_TOKENS,
                 model_context_limit - params["prompt_tokens"] - 100  # Safety buffer
             )
             
@@ -308,7 +309,7 @@ class UnifiedAIProvider:
             # Use dynamic max_tokens, ensuring total doesn't exceed context limit
             max_response_tokens = min(
                 params["response_tokens"], 
-                4096,  # Claude API limit for responses
+                self.MAX_PREDICT_TOKENS,
                 model_context_limit - params["prompt_tokens"] - 1000  # Safety buffer
             )
             
@@ -348,8 +349,6 @@ class UnifiedAIProvider:
     def _generate_gemini(self, prompt: str) -> str:
         """Generate using Google Gemini API with structured output enforcement."""
         try:
-            import google.generativeai as genai
-            
             api_key = os.getenv('GEMINI_API_KEY')
             if not api_key:
                 raise Exception("GEMINI_API_KEY environment variable not set")
@@ -380,10 +379,9 @@ class UnifiedAIProvider:
             # Create the model
             model = genai.GenerativeModel(self.config.ai.model)
             
-            # Use dynamic max_tokens, ensuring total doesn't exceed context limit
             max_response_tokens = min(
                 params["response_tokens"], 
-                8192,  # Gemini API limit for responses
+                self.MAX_PREDICT_TOKENS,
                 model_context_limit - params["prompt_tokens"] - 1000  # Safety buffer
             )
             
