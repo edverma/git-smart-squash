@@ -410,10 +410,17 @@ class UnifiedAIProvider:
             
             # Check if response was truncated
             if response.candidates[0].finish_reason.name == 'MAX_TOKENS':
-                print(f"Warning: Gemini response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
+                raise Exception(f"Gemini response truncated at {max_response_tokens} tokens. Consider reducing diff size or using a model with larger context window.")
+            
+            # Check if response has no valid parts
+            if not response.candidates[0].content.parts:
+                raise Exception(f"Gemini response has no content parts. Finish reason: {response.candidates[0].finish_reason}")
             
             # Extract structured data from response
-            response_text = response.text
+            try:
+                response_text = response.text
+            except Exception as e:
+                raise Exception(f"Failed to extract text from Gemini response: {e}. Finish reason: {response.candidates[0].finish_reason}")
             
             # Parse the JSON response to extract commits array
             try:

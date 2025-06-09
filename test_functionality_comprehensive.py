@@ -304,20 +304,25 @@ class TestMultiCommitFunctionality(unittest.TestCase):
                 'message': 'test: authentication tests',
                 'files': ['tests/test_auth.py'],
                 'rationale': 'Auth tests'
+            },
+            {
+                'message': 'chore: remaining files',
+                'files': ['src/models.py', 'tests/test_models.py', 'docs/api.md', 'package.json'],
+                'rationale': 'All other files'
             }
         ]
         
         self.cli.apply_commit_plan(commit_plan, 'main')
         
         # Check that the first commit contains only auth.py
-        result = subprocess.run(['git', 'show', '--name-only', 'HEAD~1'], 
+        result = subprocess.run(['git', 'show', '--name-only', 'HEAD~2'], 
                               capture_output=True, text=True, check=True)
         files_in_first_commit = result.stdout.strip().split('\n')
         self.assertIn('src/auth.py', files_in_first_commit)
         self.assertNotIn('tests/test_auth.py', files_in_first_commit)
         
         # Check that the second commit contains only test_auth.py
-        result = subprocess.run(['git', 'show', '--name-only', 'HEAD'], 
+        result = subprocess.run(['git', 'show', '--name-only', 'HEAD~1'], 
                               capture_output=True, text=True, check=True)
         files_in_second_commit = result.stdout.strip().split('\n')
         self.assertIn('tests/test_auth.py', files_in_second_commit)
@@ -340,6 +345,11 @@ class TestMultiCommitFunctionality(unittest.TestCase):
                 'message': 'feat: another existing file',
                 'files': ['src/models.py'],
                 'rationale': 'Another real file'
+            },
+            {
+                'message': 'chore: remaining files',
+                'files': ['tests/test_auth.py', 'tests/test_models.py', 'docs/api.md', 'package.json'],
+                'rationale': 'All other files'
             }
         ]
         
@@ -350,11 +360,11 @@ class TestMultiCommitFunctionality(unittest.TestCase):
         # Should skip the nonexistent file commit
         self.assertIn('Skipping commit', output)
         
-        # Should only create 2 commits (not 3)
+        # Should only create 3 commits (not 4, skipping the nonexistent file one)
         result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
                               capture_output=True, text=True, check=True)
         log_lines = result.stdout.strip().split('\n')
-        self.assertEqual(len(log_lines), 2)
+        self.assertEqual(len(log_lines), 3)
     
     def test_empty_files_list_is_skipped(self):
         """Test that commits with empty files list are skipped"""
@@ -368,6 +378,11 @@ class TestMultiCommitFunctionality(unittest.TestCase):
                 'message': 'feat: empty commit',
                 'files': [],
                 'rationale': 'No files'
+            },
+            {
+                'message': 'chore: remaining files',
+                'files': ['src/models.py', 'tests/test_auth.py', 'tests/test_models.py', 'docs/api.md', 'package.json'],
+                'rationale': 'All other files'
             }
         ]
         
@@ -378,11 +393,11 @@ class TestMultiCommitFunctionality(unittest.TestCase):
         # Should skip the empty files commit
         self.assertIn('no files specified', output)
         
-        # Should only create 1 commit
+        # Should only create 2 commits (skipping the empty one)
         result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
                               capture_output=True, text=True, check=True)
         log_lines = result.stdout.strip().split('\n')
-        self.assertEqual(len(log_lines), 1)
+        self.assertEqual(len(log_lines), 2)
     
     def test_remaining_files_handled(self):
         """Test that any remaining unstaged files are committed as final commit"""
