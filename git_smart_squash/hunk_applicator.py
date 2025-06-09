@@ -16,7 +16,7 @@ class HunkApplicatorError(Exception):
 
 def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: str) -> bool:
     """
-    Apply specific hunks to the git staging area.
+    Apply specific hunks to the git staging area using sequential application.
     
     Args:
         hunk_ids: List of hunk IDs to apply
@@ -44,13 +44,85 @@ def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: st
     if not is_valid:
         raise HunkApplicatorError(f"Invalid hunk combination: {error_msg}")
     
-    # Create patch for selected hunks
-    patch_content = create_hunk_patch(hunks_to_apply, base_diff)
-    if not patch_content.strip():
-        return True  # Nothing to apply
+    # Apply hunks sequentially for better reliability
+    return _apply_hunks_sequentially(hunks_to_apply, base_diff)
+
+
+def _apply_hunks_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
+    """
+    Apply hunks one by one for better reliability and error isolation.
     
-    # Apply the patch
-    return _apply_patch_to_staging(patch_content)
+    Args:
+        hunks: List of hunks to apply
+        base_diff: Original full diff output
+        
+    Returns:
+        True if all hunks applied successfully, False otherwise
+    """
+    from .diff_parser import create_hunk_patch
+    
+    # Sort hunks by file and line number for consistent application order
+    sorted_hunks = sorted(hunks, key=lambda h: (h.file_path, h.start_line))
+    
+    for i, hunk in enumerate(sorted_hunks):
+        try:
+            # Create a patch for this single hunk
+            single_hunk_patch = create_hunk_patch([hunk], base_diff)
+            
+            if not single_hunk_patch.strip():
+                print(f"Warning: Empty patch generated for hunk {hunk.id}")
+                continue
+            
+            # Validate the patch before applying
+            if not _validate_patch_format(single_hunk_patch):
+                print(f"Error: Invalid patch format for hunk {hunk.id}")
+                return False
+            
+            # Apply this individual hunk
+            success = _apply_patch_to_staging(single_hunk_patch)
+            if not success:
+                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(sorted_hunks)})")
+                return False
+            
+        except Exception as e:
+            print(f"Error applying hunk {hunk.id}: {e}")
+            return False
+    
+    return True
+
+
+def _validate_patch_format(patch_content: str) -> bool:
+    """
+    Validate that a patch has the correct format before applying.
+    
+    Args:
+        patch_content: The patch content to validate
+        
+    Returns:
+        True if patch format is valid, False otherwise
+    """
+    lines = patch_content.strip().split('\n')
+    
+    if not lines:
+        return False
+    
+    # Must start with diff --git
+    if not lines[0].startswith('diff --git'):
+        return False
+    
+    # Must have at least one @@ hunk header
+    has_hunk = any(line.startswith('@@') for line in lines)
+    if not has_hunk:
+        return False
+    
+    # Check for basic file header structure
+    has_file_markers = any(line.startswith('---') for line in lines) and \
+                      any(line.startswith('+++') for line in lines)
+    
+    if not has_file_markers:
+        return False
+    
+    return True
 
 
 def _apply_patch_to_staging(patch_content: str) -> bool:
@@ -70,19 +142,33 @@ def _apply_patch_to_staging(patch_content: str) -> bool:
             patch_file_path = patch_file.name
         
         try:
-            # Apply the patch to the staging area
+            # Apply the patch to the staging area with tolerant flags
             result = subprocess.run(
-                ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
+                ['git', 'apply', '--cached', '--whitespace=nowarn', '--ignore-space-change', '--ignore-whitespace', patch_file_path],
                 capture_output=True,
                 text=True,
                 check=False
             )
             
             if result.returncode != 0:
-                print(f"Git apply failed: {result.stderr}")
-                # Debug: also print the patch content for troubleshooting
-                print(f"Debug: Patch content (first 500 chars):\n{patch_content[:500]}")
-                return False
+                # Try with even more permissive flags
+                result = subprocess.run(
+                    ['git', 'apply', '--cached', '--whitespace=fix', '--ignore-space-change', '--ignore-whitespace', patch_file_path],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                if result.returncode != 0:
+                    print(f"Git apply failed even with permissive flags: {result.stderr}")
+                    # Only show debug info for individual hunk failures, not the massive combined patches
+                    if len(patch_content) < 1000:  # Only show debug for small patches
+                        print(f"Debug: Patch content:\n{patch_content}")
+                    else:
+                        print(f"Debug: Large patch ({len(patch_content)} chars), first 200 chars:\n{patch_content[:200]}")
+                    return False
+                else:
+                    print("✓ Applied with whitespace fixes")
             
             return True
             
