@@ -77,7 +77,7 @@ class UnifiedAIProvider:
         
         # Ensure context window is always sufficient for prompt + substantial response buffer
         # Use larger buffer for complex tasks and be more conservative
-        response_buffer = max(2000, prompt_tokens // 4)  # Scale buffer with prompt size
+        response_buffer = max(2000, (prompt_tokens // 3) + 2000)  # Scale buffer with prompt size
         context_needed = prompt_tokens + response_buffer
         
         # Ensure we never exceed hard limits but always accommodate the full prompt
