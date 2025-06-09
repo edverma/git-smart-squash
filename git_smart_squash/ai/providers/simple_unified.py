@@ -11,7 +11,16 @@ from typing import Optional
 class UnifiedAIProvider:
     """Simplified unified AI provider."""
     
-    MAX_CONTEXT_TOKENS = 32000
+    # Provider-specific hard maximum context token limits
+    PROVIDER_MAX_CONTEXT_TOKENS = {
+        'ollama': 32000,      # Ollama hard maximum
+        'openai': 1000000,    # OpenAI hard maximum
+        'gemini': 1000000,    # Gemini hard maximum
+        'anthropic': 200000   # Anthropic hard maximum
+    }
+    
+    # Conservative defaults
+    DEFAULT_MAX_CONTEXT_TOKENS = 32000
     MAX_PREDICT_TOKENS = 32000
     
     # Schema for commit organization JSON structure  
@@ -59,6 +68,11 @@ class UnifiedAIProvider:
     def __init__(self, config):
         self.config = config
         self.provider_type = config.ai.provider.lower()
+        # Set provider-specific maximum context tokens
+        self.MAX_CONTEXT_TOKENS = self.PROVIDER_MAX_CONTEXT_TOKENS.get(
+            self.provider_type, 
+            self.DEFAULT_MAX_CONTEXT_TOKENS
+        )
     
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count using conservative heuristics."""
