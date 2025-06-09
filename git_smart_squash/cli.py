@@ -133,43 +133,16 @@ class GitSmartSquashCLI:
             subprocess.run(['git', 'rev-parse', '--git-dir'], 
                          check=True, capture_output=True)
             
-            # Try to get the diff between committed changes first
-            committed_result = subprocess.run(
+            # Try to get the diff
+            result = subprocess.run(
                 ['git', 'diff', f'{base_branch}...HEAD'],
                 capture_output=True, text=True, check=True
             )
             
-            # Check for uncommitted changes
-            uncommitted_result = subprocess.run(
-                ['git', 'diff', 'HEAD'],
-                capture_output=True, text=True, check=True
-            )
-            
-            committed_diff = committed_result.stdout.strip()
-            uncommitted_diff = uncommitted_result.stdout.strip()
-            
-            # If we have both committed and uncommitted changes, combine them
-            if committed_diff and uncommitted_diff:
-                self.console.print("[yellow]Found both committed and uncommitted changes. Including both in analysis.[/yellow]")
-                # Combine the diffs - uncommitted changes come after committed ones
-                return committed_diff + "\n" + uncommitted_diff
-            
-            # If only committed changes
-            elif committed_diff:
-                return committed_diff
-            
-            # If only uncommitted changes
-            elif uncommitted_diff:
-                self.console.print("[yellow]Detected uncommitted changes. Consider committing them first for better organization.[/yellow]")
-                # Get diff relative to base branch for uncommitted changes
-                result = subprocess.run(
-                    ['git', 'diff', base_branch],
-                    capture_output=True, text=True, check=True
-                )
-                return result.stdout.strip() or None
-            
-            # No changes at all
-            return None
+            if not result.stdout.strip():
+                return None
+                
+            return result.stdout
             
         except subprocess.CalledProcessError as e:
             if 'unknown revision' in e.stderr:
