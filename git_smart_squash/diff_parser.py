@@ -4,8 +4,8 @@ Diff parser module for extracting individual hunks from git diff output.
 
 import re
 import subprocess
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple, Set, Dict
 
 
 @dataclass
@@ -17,6 +17,9 @@ class Hunk:
     end_line: int
     content: str
     context: str
+    dependencies: Set[str] = field(default_factory=set)  # Hunk IDs this depends on
+    dependents: Set[str] = field(default_factory=set)    # Hunk IDs that depend on this
+    change_type: str = field(default="modification")     # addition, deletion, modification, import, export
 
 
 def parse_diff(diff_output: str, context_lines: int = 3) -> List[Hunk]:
@@ -85,19 +88,26 @@ def parse_diff(diff_output: str, context_lines: int = 3) -> List[Hunk]:
                 # Get context around the hunk
                 context = get_hunk_context(current_file, new_start, end_line, context_lines)
                 
+                # Analyze change type
+                change_type = analyze_hunk_change_type(hunk_content, current_file)
+                
                 hunk = Hunk(
                     id=hunk_id,
                     file_path=current_file,
                     start_line=new_start,
                     end_line=end_line,
                     content=hunk_content,
-                    context=context
+                    context=context,
+                    change_type=change_type
                 )
                 
                 hunks.append(hunk)
                 continue  # Don't increment i, we already did it in the while loop
         
         i += 1
+    
+    # Analyze dependencies between hunks
+    analyze_hunk_dependencies(hunks)
     
     return hunks
 
@@ -161,18 +171,22 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
             hunks_by_file[hunk.file_path] = []
         hunks_by_file[hunk.file_path].append(hunk)
     
-    # Parse the base diff to extract file headers
+    # Parse the base diff to extract file headers and validate hunks
     base_lines = base_diff.split('\n')
     file_headers = {}
+    file_hunks_in_base = {}  # Track all hunks in base diff for validation
     
     i = 0
+    current_file = None
     while i < len(base_lines):
         line = base_lines[i]
         if line.startswith('diff --git'):
             # Extract file path from diff header
             match = re.match(r'diff --git a/(.*) b/(.*)', line)
             if match:
-                file_path = match.group(2)
+                current_file = match.group(2)
+                file_headers[current_file] = []
+                file_hunks_in_base[current_file] = []
                 header_lines = [line]
                 i += 1
                 
@@ -184,11 +198,14 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
                     header_lines.append(next_line)
                     i += 1
                 
-                file_headers[file_path] = header_lines
+                file_headers[current_file] = header_lines
                 continue
+        elif line.startswith('@@') and current_file:
+            # Track hunks in base diff
+            file_hunks_in_base[current_file].append(line)
         i += 1
     
-    # Build the patch
+    # Build the patch with validation
     patch_parts = []
     
     for file_path, file_hunks in hunks_by_file.items():
@@ -204,10 +221,32 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
                 f"+++ b/{file_path}"
             ])
         
-        # Add hunks for this file
-        for hunk in sorted(file_hunks, key=lambda h: h.start_line):
-            # Split hunk content and add each line
+        # Sort hunks and validate before adding
+        sorted_hunks = sorted(file_hunks, key=lambda h: h.start_line)
+        
+        # Check for potential issues with line number jumps
+        for i, hunk in enumerate(sorted_hunks):
             hunk_lines = hunk.content.split('\n')
+            
+            # Validate hunk format
+            if hunk_lines and hunk_lines[0].startswith('@@'):
+                # Check if the hunk header has reasonable line numbers
+                hunk_header = hunk_lines[0]
+                if not _validate_hunk_header(hunk_header):
+                    print(f"Warning: Invalid hunk header detected: {hunk_header}")
+                    # Try to reconstruct a valid header
+                    reconstructed_header = _reconstruct_hunk_header(hunk, hunk_lines)
+                    if reconstructed_header:
+                        hunk_lines[0] = reconstructed_header
+                        print(f"✓ Reconstructed header: {reconstructed_header}")
+                    else:
+                        print(f"Error: Could not reconstruct valid header for hunk {hunk.id}, creating minimal fallback")
+                        # Create a minimal fallback header that git can understand
+                        fallback_header = _create_fallback_header(hunk, hunk_lines)
+                        hunk_lines[0] = fallback_header
+                        print(f"✓ Created fallback header: {fallback_header}")
+            
+            # Add the hunk lines
             for line in hunk_lines:
                 if line:  # Skip completely empty lines
                     patch_parts.append(line)
@@ -248,3 +287,444 @@ def validate_hunk_combination(hunks: List[Hunk]) -> Tuple[bool, str]:
                 return False, f"Overlapping hunks in {file_path}: {current_hunk.id} and {next_hunk.id}"
     
     return True, ""
+
+
+def analyze_hunk_change_type(hunk_content: str, file_path: str) -> str:
+    """
+    Analyze the type of change in a hunk to help with dependency detection.
+    
+    Args:
+        hunk_content: The hunk content
+        file_path: Path to the file being changed
+        
+    Returns:
+        String describing the change type
+    """
+    lines = hunk_content.split('\n')
+    
+    # Check for import/export related changes
+    import_patterns = [
+        r'^\+.*import\s+.*from\s+[\'"]',  # ES6 imports
+        r'^\+.*import\s+[\'"]',          # Import statements
+        r'^\+.*require\s*\([\'"]',       # CommonJS require
+        r'^\+.*from\s+[\'"].*[\'"]',     # From imports
+    ]
+    
+    export_patterns = [
+        r'^\+.*export\s+',               # Export statements
+        r'^\+.*module\.exports\s*=',     # CommonJS exports
+    ]
+    
+    # Count different types of changes
+    additions = sum(1 for line in lines if line.startswith('+') and not line.startswith('+++'))
+    deletions = sum(1 for line in lines if line.startswith('-') and not line.startswith('---'))
+    
+    # Check for import/export changes
+    for line in lines:
+        for pattern in import_patterns:
+            if re.match(pattern, line):
+                return "import"
+        for pattern in export_patterns:
+            if re.match(pattern, line):
+                return "export"
+    
+    # Determine change type based on addition/deletion ratio
+    if deletions == 0 and additions > 0:
+        return "addition"
+    elif additions == 0 and deletions > 0:
+        return "deletion"
+    else:
+        return "modification"
+
+
+def analyze_hunk_dependencies(hunks: List[Hunk]) -> None:
+    """
+    Analyze dependencies between hunks to enable intelligent grouping.
+    
+    Args:
+        hunks: List of hunks to analyze (modified in place)
+    """
+    # Build maps for quick lookups
+    hunks_by_file = {}
+    import_export_map = {}
+    
+    for hunk in hunks:
+        if hunk.file_path not in hunks_by_file:
+            hunks_by_file[hunk.file_path] = []
+        hunks_by_file[hunk.file_path].append(hunk)
+        
+        # Extract import/export information
+        if hunk.change_type in ["import", "export"]:
+            imports, exports = extract_import_export_info(hunk.content)
+            import_export_map[hunk.id] = {"imports": imports, "exports": exports}
+    
+    # Analyze dependencies
+    for hunk in hunks:
+        # 1. Import/Export dependencies
+        if hunk.id in import_export_map:
+            hunk_info = import_export_map[hunk.id]
+            
+            # Find dependencies based on what this hunk imports
+            for imported_module in hunk_info["imports"]:
+                for other_hunk in hunks:
+                    if other_hunk.id != hunk.id and other_hunk.id in import_export_map:
+                        other_info = import_export_map[other_hunk.id]
+                        if imported_module in other_info["exports"]:
+                            hunk.dependencies.add(other_hunk.id)
+                            other_hunk.dependents.add(hunk.id)
+        
+        # 2. Line number dependencies (hunks that affect each other's line numbers)
+        for other_hunk in hunks_by_file.get(hunk.file_path, []):
+            if other_hunk.id != hunk.id:
+                # Check if this hunk's line numbers depend on the other hunk
+                if _hunks_have_line_dependencies(hunk, other_hunk):
+                    if other_hunk.start_line < hunk.start_line:
+                        # This hunk depends on the earlier hunk
+                        hunk.dependencies.add(other_hunk.id)
+                        other_hunk.dependents.add(hunk.id)
+        
+        # 3. Same file proximity dependencies (changes in the same file that are close together)
+        for other_hunk in hunks_by_file.get(hunk.file_path, []):
+            if other_hunk.id != hunk.id:
+                # If hunks are very close (within 10 lines), they might be related
+                line_distance = abs(hunk.start_line - other_hunk.start_line)
+                if line_distance <= 10:
+                    # Create weak dependencies for same-file proximity
+                    if hunk.start_line > other_hunk.start_line:
+                        hunk.dependencies.add(other_hunk.id)
+                        other_hunk.dependents.add(hunk.id)
+        
+        # 4. Component usage dependencies (for frontend frameworks)
+        if _is_frontend_file(hunk.file_path):
+            component_deps = find_component_dependencies(hunk, hunks)
+            for dep_id in component_deps:
+                hunk.dependencies.add(dep_id)
+                # Find the dependent hunk and update its dependents
+                for other_hunk in hunks:
+                    if other_hunk.id == dep_id:
+                        other_hunk.dependents.add(hunk.id)
+                        break
+
+
+def extract_import_export_info(hunk_content: str) -> Tuple[Set[str], Set[str]]:
+    """
+    Extract import and export information from hunk content.
+    
+    Args:
+        hunk_content: The hunk content to analyze
+        
+    Returns:
+        Tuple of (imports, exports) as sets of module names
+    """
+    imports = set()
+    exports = set()
+    
+    lines = hunk_content.split('\n')
+    
+    for line in lines:
+        if not line.startswith('+'):
+            continue
+            
+        line = line[1:].strip()  # Remove + prefix
+        
+        # Extract imports
+        import_match = re.search(r'import\s+.*from\s+[\'"]([^\'"]+)[\'"]', line)
+        if import_match:
+            imports.add(import_match.group(1))
+        
+        import_match = re.search(r'import\s+[\'"]([^\'"]+)[\'"]', line)
+        if import_match:
+            imports.add(import_match.group(1))
+        
+        require_match = re.search(r'require\s*\([\'"]([^\'"]+)[\'"]\)', line)
+        if require_match:
+            imports.add(require_match.group(1))
+        
+        # Extract exports
+        if 'export' in line:
+            exports.add("__exported__")  # Simplified for now
+    
+    return imports, exports
+
+
+def find_component_dependencies(hunk: Hunk, all_hunks: List[Hunk]) -> Set[str]:
+    """
+    Find component-related dependencies for frontend frameworks.
+    
+    Args:
+        hunk: The hunk to analyze
+        all_hunks: All hunks to search for dependencies
+        
+    Returns:
+        Set of hunk IDs that this hunk depends on
+    """
+    dependencies = set()
+    
+    # Extract component names from the hunk content
+    component_names = extract_component_names(hunk.content)
+    
+    # Look for hunks that define these components
+    for other_hunk in all_hunks:
+        if other_hunk.id != hunk.id:
+            for component_name in component_names:
+                if component_name in other_hunk.content:
+                    dependencies.add(other_hunk.id)
+                    break
+    
+    return dependencies
+
+
+def extract_component_names(content: str) -> Set[str]:
+    """
+    Extract component names from content (simplified for now).
+    
+    Args:
+        content: The content to analyze
+        
+    Returns:
+        Set of component names found
+    """
+    component_names = set()
+    
+    # Simple patterns for common frontend frameworks
+    patterns = [
+        r'<(\w+)[^>]*>',           # HTML/JSX tags
+        r'import\s+(\w+)\s+from',  # Import statements
+        r'component\s*:\s*(\w+)',  # Vue component definitions
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, content)
+        for match in matches:
+            if match and match[0].isupper():  # Component names typically start with uppercase
+                component_names.add(match)
+    
+    return component_names
+
+
+def _is_frontend_file(file_path: str) -> bool:
+    """Check if a file is a frontend framework file."""
+    frontend_extensions = ['.vue', '.svelte', '.jsx', '.tsx', '.js', '.ts']
+    return any(file_path.endswith(ext) for ext in frontend_extensions)
+
+
+def create_dependency_groups(hunks: List[Hunk]) -> List[List[Hunk]]:
+    """
+    Group hunks based on their dependencies for atomic application.
+    
+    Args:
+        hunks: List of hunks with dependency information
+        
+    Returns:
+        List of hunk groups that should be applied together
+    """
+    # Start with all hunks ungrouped
+    ungrouped = set(hunk.id for hunk in hunks)
+    hunk_map = {hunk.id: hunk for hunk in hunks}
+    groups = []
+    
+    while ungrouped:
+        # Start a new group with a hunk that has no ungrouped dependencies
+        group_seeds = []
+        for hunk_id in ungrouped:
+            hunk = hunk_map[hunk_id]
+            ungrouped_deps = hunk.dependencies & ungrouped
+            if not ungrouped_deps:
+                group_seeds.append(hunk_id)
+        
+        if not group_seeds:
+            # If no seeds found, we have circular dependencies - break by picking the first one
+            group_seeds = [next(iter(ungrouped))]
+        
+        # Build a group starting from a seed
+        current_group = set()
+        to_process = [group_seeds[0]]
+        
+        while to_process:
+            current_id = to_process.pop(0)
+            if current_id in ungrouped and current_id not in current_group:
+                current_group.add(current_id)
+                hunk = hunk_map[current_id]
+                
+                # Add all dependents that are still ungrouped
+                for dependent_id in hunk.dependents:
+                    if dependent_id in ungrouped and dependent_id not in current_group:
+                        to_process.append(dependent_id)
+                
+                # Add dependencies that are still ungrouped
+                for dep_id in hunk.dependencies:
+                    if dep_id in ungrouped and dep_id not in current_group:
+                        to_process.append(dep_id)
+        
+        # Convert group to list of hunks
+        group_hunks = [hunk_map[hunk_id] for hunk_id in current_group]
+        groups.append(group_hunks)
+        
+        # Remove grouped hunks from ungrouped
+        ungrouped -= current_group
+    
+    return groups
+
+
+def _validate_hunk_header(header: str) -> bool:
+    """
+    Validate that a hunk header has reasonable line numbers.
+    
+    Args:
+        header: The hunk header line starting with @@
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    match = re.match(r'@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', header)
+    if not match:
+        return False
+    
+    old_start = int(match.group(1))
+    old_count = int(match.group(2)) if match.group(2) else 1
+    new_start = int(match.group(3))
+    new_count = int(match.group(4)) if match.group(4) else 1
+    
+    # Fundamental issue: Line number changes indicate missing context
+    # When old_start and new_start differ significantly, it means other changes
+    # in the file have shifted line numbers, making this hunk dependent on those changes
+    line_shift = old_start - new_start
+    
+    # If the line shift is greater than what this hunk accounts for,
+    # it means this hunk depends on other changes not included in its content
+    if line_shift > old_count:
+        # This hunk cannot be applied in isolation because it references
+        # line numbers that assume other changes have already been applied
+        return False
+    
+    # Similarly, if new file has more lines than old (negative shift),
+    # but this hunk doesn't account for those additions
+    if line_shift < 0 and abs(line_shift) > new_count:
+        return False
+    
+    # Check for zero counts (invalid)
+    if old_count == 0 and new_count == 0:
+        return False
+    
+    return True
+
+
+def _reconstruct_hunk_header(hunk: Hunk, hunk_lines: List[str]) -> Optional[str]:
+    """
+    Try to reconstruct a valid hunk header from the hunk content.
+    
+    Args:
+        hunk: The Hunk object
+        hunk_lines: The lines of the hunk content
+        
+    Returns:
+        Reconstructed header or None if unable
+    """
+    # Count additions and deletions
+    additions = sum(1 for line in hunk_lines[1:] if line.startswith('+') and not line.startswith('+++'))
+    deletions = sum(1 for line in hunk_lines[1:] if line.startswith('-') and not line.startswith('---'))
+    context = sum(1 for line in hunk_lines[1:] if line.startswith(' '))
+    
+    # Calculate counts
+    old_count = deletions + context
+    new_count = additions + context
+    
+    # Use hunk metadata for start lines
+    old_start = max(1, hunk.start_line - context // 2)
+    new_start = hunk.start_line
+    
+    # Build header
+    header = f"@@ -{old_start},{old_count} +{new_start},{new_count} @@"
+    
+    # Extract any context from original header
+    if hunk_lines and '@@' in hunk_lines[0]:
+        parts = hunk_lines[0].split('@@')
+        if len(parts) >= 3:
+            header += f" {parts[2]}"
+    
+    return header
+
+
+def _hunks_have_line_dependencies(hunk1: Hunk, hunk2: Hunk) -> bool:
+    """
+    Check if two hunks have line number dependencies.
+    
+    Args:
+        hunk1: First hunk to check
+        hunk2: Second hunk to check
+        
+    Returns:
+        True if hunk1's line numbers depend on hunk2's changes
+    """
+    # Only check hunks in the same file
+    if hunk1.file_path != hunk2.file_path:
+        return False
+    
+    # Parse hunk headers to understand line number changes
+    def get_line_changes(hunk_content: str) -> Tuple[int, int]:
+        """Extract line changes (additions, deletions) from hunk content."""
+        lines = hunk_content.split('\n')
+        additions = sum(1 for line in lines if line.startswith('+') and not line.startswith('+++'))
+        deletions = sum(1 for line in lines if line.startswith('-') and not line.startswith('---'))
+        return additions, deletions
+    
+    # Get line changes for both hunks
+    adds1, dels1 = get_line_changes(hunk1.content)
+    adds2, dels2 = get_line_changes(hunk2.content)
+    
+    # Calculate net line change (positive = file grows, negative = file shrinks)
+    net_change2 = adds2 - dels2
+    
+    # If hunk2 changes the file size and comes before hunk1,
+    # then hunk1's line numbers are affected by hunk2
+    if hunk2.start_line < hunk1.start_line and net_change2 != 0:
+        return True
+    
+    # Check for overlapping line ranges that would affect each other
+    range1 = set(range(hunk1.start_line, hunk1.end_line + 1))
+    range2 = set(range(hunk2.start_line, hunk2.end_line + 1))
+    
+    # If ranges overlap or are very close, they likely depend on each other
+    if range1 & range2 or min(range1) - max(range2) <= 3 or min(range2) - max(range1) <= 3:
+        return True
+    
+    return False
+
+
+def _create_fallback_header(hunk: Hunk, hunk_lines: List[str]) -> str:
+    """
+    Create a minimal fallback header when reconstruction fails.
+    
+    Args:
+        hunk: The Hunk object
+        hunk_lines: The lines of the hunk content
+        
+    Returns:
+        A minimal but valid header that git can apply
+    """
+    # Count actual content lines (exclude the bad header)
+    content_lines = hunk_lines[1:] if len(hunk_lines) > 1 else []
+    
+    additions = sum(1 for line in content_lines if line.startswith('+') and not line.startswith('+++'))
+    deletions = sum(1 for line in content_lines if line.startswith('-') and not line.startswith('---'))
+    context = sum(1 for line in content_lines if line.startswith(' '))
+    
+    # For simple cases, create a minimal header
+    if additions == 0 and deletions == 0:
+        # No actual changes, just context - create a no-op header
+        return f"@@ -{hunk.start_line},{context} +{hunk.start_line},{context} @@"
+    
+    # Calculate reasonable start positions
+    old_start = max(1, hunk.start_line)
+    new_start = max(1, hunk.start_line)
+    
+    old_count = deletions + context
+    new_count = additions + context
+    
+    # Ensure counts are at least 1 if there are changes
+    if old_count == 0 and (deletions > 0 or context > 0):
+        old_count = 1
+    if new_count == 0 and (additions > 0 or context > 0):
+        new_count = 1
+    
+    return f"@@ -{old_start},{old_count} +{new_start},{new_count} @@"
