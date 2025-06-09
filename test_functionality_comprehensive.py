@@ -20,8 +20,9 @@ from io import StringIO
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from git_smart_squash.cli import GitSmartSquashCLI
-from git_smart_squash.simple_config import ConfigManager, Config, AIConfig
+from git_smart_squash.simple_config import ConfigManager, Config, AIConfig, HunkConfig
 from git_smart_squash.ai.providers.simple_unified import UnifiedAIProvider
+from git_smart_squash.diff_parser import Hunk, parse_diff
 
 
 class TestCoreConceptFourSteps(unittest.TestCase):
@@ -87,57 +88,59 @@ class TestCoreConceptFourSteps(unittest.TestCase):
             )
             self.assertEqual(diff, 'mock diff output')
     
-    def test_step2_ai_analysis_exact_prompt(self):
-        """Test Step 2: AI analysis uses exact prompt from FUNCTIONALITY.md"""
-        expected_prompt = """
-            Analyze this git diff and organize it into logical, reviewable commits that would be easy for a reviewer to understand in a pull request.
-
-            For each commit, provide:
-            1. A conventional commit message (type: description)
-            2. The specific file changes that should be included
-            3. A brief rationale for why these changes belong together
-
-            Respond with a JSON array where each commit has this structure:
-            {
-                "message": "feat: add user authentication system",
-                "files": ["src/auth.py", "src/models/user.py"],
-                "rationale": "Groups all authentication-related changes together"
-            }
-
-            Here's the diff to analyze:
-
-            mock diff content
-            """
+    def test_step2_ai_analysis_hunk_based_prompt(self):
+        """Test Step 2: AI analysis uses hunk-based prompt with individual hunks"""
+        # Create mock hunks for testing
+        mock_hunks = [
+            Hunk(
+                id="src/auth.py:1-5",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=5,
+                content="@@ -0,0 +1,2 @@\n+def authenticate(user):\n+    return True",
+                context="    1: def authenticate(user):\n    2:     return True"
+            ),
+            Hunk(
+                id="src/models.py:1-3",
+                file_path="src/models.py", 
+                start_line=1,
+                end_line=3,
+                content="@@ -0,0 +1,1 @@\n+class User: pass",
+                context="    1: class User: pass"
+            )
+        ]
         
         with patch.object(UnifiedAIProvider, 'generate') as mock_generate:
             mock_generate.return_value = '[]'
             
-            from git_smart_squash.simple_config import Config, AIConfig
-            self.cli.config = Config(ai=AIConfig())
-            self.cli.analyze_with_ai('mock diff content')
+            from git_smart_squash.simple_config import Config, AIConfig, HunkConfig
+            self.cli.config = Config(ai=AIConfig(), hunks=HunkConfig())
+            self.cli.analyze_with_ai(mock_hunks, 'mock full diff')
             
-            # Verify the exact prompt is used
+            # Verify the hunk-based prompt is used
             actual_prompt = mock_generate.call_args[0][0]
             
-            # Check key phrases from the updated simplified prompt
-            self.assertIn('Analyze this git diff and organize changes into logical commits', actual_prompt)
-            self.assertIn('conventional commit message', actual_prompt)
-            self.assertIn('specific file changes', actual_prompt)
-            self.assertIn('brief rationale', actual_prompt)
-            self.assertIn('mock diff content', actual_prompt)
+            # Check key phrases for hunk-based analysis
+            self.assertIn('Analyze these code changes and organize them into logical commits', actual_prompt)
+            self.assertIn('Each change is represented as a \'hunk\' with a unique ID', actual_prompt)
+            self.assertIn('hunk_ids', actual_prompt)
+            self.assertIn('Group related hunks together', actual_prompt)
+            self.assertIn('Hunk ID: src/auth.py:1-5', actual_prompt)
+            self.assertIn('Hunk ID: src/models.py:1-3', actual_prompt)
+            self.assertIn('CODE CHANGES TO ANALYZE:', actual_prompt)
     
     def test_step3_proposed_structure_exact_format(self):
-        """Test Step 3: Display shows exact format from FUNCTIONALITY.md"""
-        # Test the exact display format from the documentation
+        """Test Step 3: Display shows hunk-based format"""
+        # Test the hunk-based display format
         commit_plan = [
             {
                 'message': 'feat: add user authentication system',
-                'files': ['src/auth.py', 'src/models/user.py', 'tests/test_auth.py'],
+                'hunk_ids': ['src/auth.py:1-15', 'src/models.py:23-45', 'tests/test_auth.py:1-10'],
                 'rationale': 'Groups all authentication-related changes together'
             },
             {
                 'message': 'docs: update API documentation for auth endpoints',
-                'files': ['docs/api.md', 'README.md'],
+                'hunk_ids': ['docs/api.md:10-25', 'README.md:5-15'],
                 'rationale': 'Separates documentation updates from implementation'
             }
         ]
@@ -157,42 +160,261 @@ class TestCoreConceptFourSteps(unittest.TestCase):
         self.assertIn('feat: add user authentication system', commit_plan[0]['message'])
         self.assertIn('docs: update API documentation', commit_plan[1]['message'])
         self.assertIn('rationale', commit_plan[0])
-        self.assertIn('files', commit_plan[0])
-    
-    def test_step4_apply_changes_exact_sequence(self):
-        """Test Step 4: Apply changes with exact git command sequence"""
-        commit_plan = [{'message': 'feat: test commit', 'files': ['test.py'], 'rationale': 'test'}]
+        self.assertIn('hunk_ids', commit_plan[0])
         
-        with patch('subprocess.run') as mock_run:
-            # Mock the command sequence for new multi-commit implementation
-            mock_run.side_effect = [
-                MagicMock(stdout='feature-auth\n', returncode=0),  # get current branch
-                MagicMock(returncode=0),  # create backup branch
-                MagicMock(returncode=0),  # git reset --soft main
-                MagicMock(returncode=0),  # git reset HEAD (unstage)
-                MagicMock(returncode=0),  # git ls-files --error-unmatch (check file exists)
-                MagicMock(returncode=0),  # git add test.py
-                MagicMock(returncode=0),  # git commit
-                MagicMock(stdout='', returncode=0),  # git status --porcelain (check remaining)
-            ]
-            
-            with patch('os.path.exists', return_value=True):
-                with patch('builtins.input', return_value='y'):
-                    self.cli.apply_commit_plan(commit_plan, 'main')
-            
-            # Verify exact git commands are used
-            calls = mock_run.call_args_list
-            
-            # Check git reset --soft specifically
-            reset_call = None
-            for call in calls:
-                if 'reset' in str(call):
-                    reset_call = call
-                    break
-            
-            self.assertIsNotNone(reset_call, "git reset --soft command not found")
-            self.assertIn('--soft', str(reset_call))
-            self.assertIn('main', str(reset_call))
+        # Test backward compatibility with files
+        old_format_plan = [
+            {
+                'message': 'feat: legacy format test',
+                'files': ['src/legacy.py'],
+                'rationale': 'Test backward compatibility'
+            }
+        ]
+        
+        try:
+            self.cli.display_commit_plan(old_format_plan)
+            legacy_worked = True
+        except Exception:
+            legacy_worked = False
+        
+        self.assertTrue(legacy_worked, "Display should work with legacy file format")
+    
+    def test_step4_apply_changes_hunk_based_sequence(self):
+        """Test Step 4: Apply changes using hunk-based application"""
+        # Create mock hunks and commit plan
+        mock_hunks = [
+            Hunk(
+                id="test.py:1-5",
+                file_path="test.py",
+                start_line=1,
+                end_line=5,
+                content="@@ -0,0 +1,2 @@\n+def test():\n+    pass",
+                context="    1: def test():\n    2:     pass"
+            )
+        ]
+        
+        commit_plan = [{'message': 'feat: test commit', 'hunk_ids': ['test.py:1-5'], 'rationale': 'test'}]
+        full_diff = "mock full diff content"
+        
+        # Mock hunk applicator functions
+        with patch('git_smart_squash.cli.apply_hunks_with_fallback') as mock_apply:
+            with patch('git_smart_squash.cli.reset_staging_area') as mock_reset:
+                with patch('subprocess.run') as mock_run:
+                    # Mock the command sequence for hunk-based implementation
+                    mock_run.side_effect = [
+                        MagicMock(stdout='feature-auth\n', returncode=0),  # get current branch
+                        MagicMock(returncode=0),  # create backup branch
+                        MagicMock(returncode=0),  # git reset --soft main
+                        MagicMock(stdout='test.py\n', returncode=0),  # git diff --cached --name-only
+                        MagicMock(returncode=0),  # git commit
+                        MagicMock(stdout='', returncode=0),  # git status --porcelain (check remaining)
+                    ]
+                    
+                    # Mock successful hunk application
+                    mock_apply.return_value = True
+                    
+                    self.cli.apply_commit_plan(commit_plan, mock_hunks, full_diff, 'main')
+                    
+                    # Verify hunk application was attempted
+                    mock_apply.assert_called_once()
+                    
+                    # Verify git commands are used
+                    calls = mock_run.call_args_list
+                    
+                    # Check git reset --soft specifically
+                    reset_call = None
+                    for call in calls:
+                        if 'reset' in str(call) and '--soft' in str(call):
+                            reset_call = call
+                            break
+                    
+                    self.assertIsNotNone(reset_call, "git reset --soft command not found")
+                    self.assertIn('--soft', str(reset_call))
+                    self.assertIn('main', str(reset_call))
+        
+        # Test backward compatibility with file-based commits in a separate test context
+        old_commit_plan = [{'message': 'feat: legacy test', 'files': ['test.py'], 'rationale': 'legacy test'}]
+        
+        with patch('git_smart_squash.cli.apply_hunks_with_fallback') as mock_apply_legacy:
+            with patch('git_smart_squash.cli.reset_staging_area'):
+                with patch('subprocess.run') as mock_run:
+                    mock_run.side_effect = [
+                        MagicMock(stdout='feature-auth\n', returncode=0),  # get current branch
+                        MagicMock(returncode=0),  # create backup branch
+                        MagicMock(returncode=0),  # git reset --soft main
+                        MagicMock(stdout='test.py\n', returncode=0),  # git diff --cached --name-only
+                        MagicMock(returncode=0),  # git commit
+                    ]
+                    
+                    mock_apply_legacy.return_value = True
+                    
+                    # Should convert files to hunk_ids for backward compatibility
+                    self.cli.apply_commit_plan(old_commit_plan, mock_hunks, full_diff, 'main')
+                    
+                    # Should still call apply_hunks_with_fallback
+                    mock_apply_legacy.assert_called_once()
+
+
+class TestHunkBasedFunctionality(unittest.TestCase):
+    """Test the new hunk-based functionality"""
+    
+    def test_diff_parsing_creates_hunks(self):
+        """Test that diff parsing correctly creates Hunk objects"""
+        sample_diff = """diff --git a/src/auth.py b/src/auth.py
+new file mode 100644
+index 0000000..123abc4
+--- /dev/null
++++ b/src/auth.py
+@@ -0,0 +1,5 @@
++def authenticate(user, password):
++    if user and password:
++        return True
++    return False
++
+diff --git a/src/models.py b/src/models.py
+new file mode 100644
+index 0000000..456def7
+--- /dev/null
++++ b/src/models.py
+@@ -0,0 +1,3 @@
++class User:
++    def __init__(self, name):
++        self.name = name"""
+        
+        hunks = parse_diff(sample_diff)
+        
+        # Should create 2 hunks (one per file)
+        self.assertEqual(len(hunks), 2)
+        
+        # Check first hunk
+        self.assertEqual(hunks[0].file_path, "src/auth.py")
+        self.assertEqual(hunks[0].start_line, 1)
+        self.assertEqual(hunks[0].end_line, 5)
+        self.assertIn("def authenticate", hunks[0].content)
+        
+        # Check second hunk  
+        self.assertEqual(hunks[1].file_path, "src/models.py")
+        self.assertEqual(hunks[1].start_line, 1)
+        self.assertEqual(hunks[1].end_line, 3)
+        self.assertIn("class User", hunks[1].content)
+        
+        # Check hunk IDs are properly formatted
+        self.assertEqual(hunks[0].id, "src/auth.py:1-5")
+        self.assertEqual(hunks[1].id, "src/models.py:1-3")
+    
+    def test_hunk_context_configuration(self):
+        """Test that hunk context lines configuration is respected"""
+        sample_diff = """diff --git a/test.py b/test.py
+new file mode 100644
+index 0000000..123abc4
+--- /dev/null
++++ b/test.py
+@@ -0,0 +1,2 @@
++def test():
++    pass"""
+        
+        # Test with different context line settings
+        hunks_3_lines = parse_diff(sample_diff, context_lines=3)
+        hunks_1_line = parse_diff(sample_diff, context_lines=1)
+        
+        self.assertEqual(len(hunks_3_lines), 1)
+        self.assertEqual(len(hunks_1_line), 1)
+        
+        # Both should have the same basic properties
+        self.assertEqual(hunks_3_lines[0].id, hunks_1_line[0].id)
+        self.assertEqual(hunks_3_lines[0].file_path, hunks_1_line[0].file_path)
+    
+    def test_hunk_validation_edge_cases(self):
+        """Test hunk validation catches overlapping hunks and other edge cases"""
+        from git_smart_squash.diff_parser import validate_hunk_combination
+        
+        # Test overlapping hunks (should fail validation)
+        overlapping_hunks = [
+            Hunk(id="test.py:1-10", file_path="test.py", start_line=1, end_line=10, content="", context=""),
+            Hunk(id="test.py:5-15", file_path="test.py", start_line=5, end_line=15, content="", context="")
+        ]
+        
+        is_valid, error = validate_hunk_combination(overlapping_hunks)
+        self.assertFalse(is_valid)
+        self.assertIn("Overlapping hunks", error)
+        
+        # Test non-overlapping hunks (should pass validation)
+        non_overlapping_hunks = [
+            Hunk(id="test.py:1-5", file_path="test.py", start_line=1, end_line=5, content="", context=""),
+            Hunk(id="test.py:10-15", file_path="test.py", start_line=10, end_line=15, content="", context="")
+        ]
+        
+        is_valid, error = validate_hunk_combination(non_overlapping_hunks)
+        self.assertTrue(is_valid)
+        self.assertEqual(error, "")
+        
+        # Test hunks from different files (should pass)
+        different_files_hunks = [
+            Hunk(id="file1.py:1-10", file_path="file1.py", start_line=1, end_line=10, content="", context=""),
+            Hunk(id="file2.py:1-10", file_path="file2.py", start_line=1, end_line=10, content="", context="")
+        ]
+        
+        is_valid, error = validate_hunk_combination(different_files_hunks)
+        self.assertTrue(is_valid)
+        
+        # Test empty list (should pass)
+        is_valid, error = validate_hunk_combination([])
+        self.assertTrue(is_valid)
+    
+    def test_large_diff_handling(self):
+        """Test handling of large diffs that exceed max_hunks_per_prompt"""
+        from git_smart_squash.simple_config import Config, AIConfig, HunkConfig
+        
+        # Create config with low max_hunks limit
+        config = Config(ai=AIConfig(), hunks=HunkConfig(max_hunks_per_prompt=2))
+        
+        # Create more hunks than the limit
+        large_diff = ""
+        for i in range(5):
+            large_diff += f"""diff --git a/file{i}.py b/file{i}.py
+new file mode 100644
+index 0000000..123abc4
+--- /dev/null
++++ b/file{i}.py
+@@ -0,0 +1,2 @@
++def function{i}():
++    pass
+
+"""
+        
+        hunks = parse_diff(large_diff)
+        self.assertEqual(len(hunks), 5)  # Should parse all hunks
+        
+        # Test that CLI would limit hunks (we'd need to test this in integration)
+        # This is more of a design verification than a unit test
+        
+    def test_complex_diff_with_multiple_hunks_per_file(self):
+        """Test parsing diff with multiple hunks in the same file"""
+        complex_diff = """diff --git a/complex.py b/complex.py
+new file mode 100644
+index 0000000..123abc4
+--- /dev/null
++++ b/complex.py
+@@ -0,0 +1,5 @@
++def function1():
++    pass
++
++def function2():
++    pass
+@@ -10,2 +15,4 @@ def existing_function():
++    # Added comment
++    return value
+"""
+        
+        hunks = parse_diff(complex_diff)
+        
+        # Should create 2 hunks for the same file
+        self.assertEqual(len(hunks), 2)
+        self.assertEqual(hunks[0].file_path, "complex.py")
+        self.assertEqual(hunks[1].file_path, "complex.py")
+        
+        # Hunks should have different line ranges
+        self.assertNotEqual(hunks[0].start_line, hunks[1].start_line)
 
 
 class TestMultiCommitFunctionality(unittest.TestCase):

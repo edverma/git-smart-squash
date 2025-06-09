@@ -24,10 +24,10 @@ class UnifiedAIProvider:
                     "type": "object",
                     "properties": {
                         "message": {"type": "string"},
-                        "files": {"type": "array", "items": {"type": "string"}},
+                        "hunk_ids": {"type": "array", "items": {"type": "string"}},
                         "rationale": {"type": "string"}
                     },
-                    "required": ["message", "files", "rationale"],
+                    "required": ["message", "hunk_ids", "rationale"],
                     "additionalProperties": False
                 }
             }
@@ -46,10 +46,10 @@ class UnifiedAIProvider:
                     "type": "object",
                     "properties": {
                         "message": {"type": "string"},
-                        "files": {"type": "array", "items": {"type": "string"}},
+                        "hunk_ids": {"type": "array", "items": {"type": "string"}},
                         "rationale": {"type": "string"}
                     },
-                    "required": ["message", "files", "rationale"]
+                    "required": ["message", "hunk_ids", "rationale"]
                 }
             }
         },

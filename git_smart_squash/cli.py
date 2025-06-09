@@ -12,6 +12,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .simple_config import ConfigManager
 from .ai.providers.simple_unified import UnifiedAIProvider
+from .diff_parser import parse_diff, Hunk
+from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area, preview_hunk_application
 
 
 class GitSmartSquashCLI:
@@ -97,14 +99,29 @@ class GitSmartSquashCLI:
                 self.console.print("[yellow]No changes found to reorganize[/yellow]")
                 return
             
-            # 2. Send diff to AI for commit organization
+            # 2. Parse diff into individual hunks
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=self.console
             ) as progress:
-                task = progress.add_task("Analyzing changes with AI...", total=None)
-                commit_plan = self.analyze_with_ai(full_diff)
+                task = progress.add_task("Parsing changes into hunks...", total=None)
+                hunks = parse_diff(full_diff, context_lines=self.config.hunks.context_lines)
+                
+                if not hunks:
+                    self.console.print("[yellow]No hunks found to reorganize[/yellow]")
+                    return
+                
+                self.console.print(f"[green]Found {len(hunks)} hunks to analyze[/green]")
+                
+                # Check if we have too many hunks for the AI to process
+                if len(hunks) > self.config.hunks.max_hunks_per_prompt:
+                    self.console.print(f"[yellow]Warning: {len(hunks)} hunks found, limiting to {self.config.hunks.max_hunks_per_prompt} for AI analysis[/yellow]")
+                    hunks = hunks[:self.config.hunks.max_hunks_per_prompt]
+                
+                # 3. Send hunks to AI for commit organization
+                progress.update(task, description="Analyzing changes with AI...")
+                commit_plan = self.analyze_with_ai(hunks, full_diff)
             
             if not commit_plan:
                 self.console.print("[red]Failed to generate commit plan[/red]")
@@ -118,7 +135,7 @@ class GitSmartSquashCLI:
                 self.console.print("\n[green]Dry run complete. Use without --dry-run to apply changes.[/green]")
             else:
                 if self.get_user_confirmation():
-                    self.apply_commit_plan(commit_plan, args.base)
+                    self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
                 else:
                     self.console.print("Operation cancelled.")
                     
@@ -160,8 +177,8 @@ class GitSmartSquashCLI:
                         continue
             raise Exception(f"Could not get diff from {base_branch}: {e.stderr}")
     
-    def analyze_with_ai(self, diff: str) -> Optional[List[Dict[str, Any]]]:
-        """Send diff to AI and get back commit organization plan."""
+    def analyze_with_ai(self, hunks: List[Hunk], full_diff: str) -> Optional[List[Dict[str, Any]]]:
+        """Send hunks to AI and get back commit organization plan."""
         try:
             # Ensure config is loaded
             if self.config is None:
@@ -169,28 +186,8 @@ class GitSmartSquashCLI:
             
             ai_provider = UnifiedAIProvider(self.config)
             
-            prompt = f"""Analyze this git diff and organize changes into logical commits for pull request review.
-
-For each commit, provide:
-1. A conventional commit message (type: description)
-2. The specific file changes that should be included
-3. A brief rationale for why these changes belong together
-
-Return your response in the following structure:
-{{
-  "commits": [
-    {{
-      "message": "feat: add user authentication system",
-      "files": ["src/auth.py", "src/models/user.py"],
-      "rationale": "Groups authentication functionality together"
-    }}
-  ]
-}}
-
-If the diff is very large, provide best-effort organization with logical groupings.
-
-DIFF TO ANALYZE:
-{diff}"""
+            # Build hunk-based prompt
+            prompt = self._build_hunk_prompt(hunks)
             
             response = ai_provider.generate(prompt)
             
@@ -204,6 +201,57 @@ DIFF TO ANALYZE:
             self.console.print(f"[red]AI analysis failed: {e}[/red]")
             return None
     
+    def _build_hunk_prompt(self, hunks: List[Hunk]) -> str:
+        """Build a prompt that shows individual hunks with context for AI analysis."""
+        
+        prompt_parts = [
+            "Analyze these code changes and organize them into logical commits for pull request review.",
+            "",
+            "Each change is represented as a 'hunk' with a unique ID. Group related hunks together",
+            "based on functionality, not just file location. A single commit can contain hunks from",
+            "multiple files if they implement the same feature or fix.",
+            "",
+            "For each commit, provide:",
+            "1. A conventional commit message (type: description)",
+            "2. The specific hunk IDs that should be included (not file paths!)",
+            "3. A brief rationale for why these changes belong together",
+            "",
+            "Return your response in this exact structure:",
+            "{",
+            '  "commits": [',
+            "    {",
+            '      "message": "feat: add user authentication system",',
+            '      "hunk_ids": ["auth.py:45-89", "models.py:23-45", "auth.py:120-145"],',
+            '      "rationale": "Groups authentication functionality together"',
+            "    }",
+            "  ]",
+            "}",
+            "",
+            "IMPORTANT: Use hunk_ids (not files) and group by logical functionality.",
+            "",
+            "CODE CHANGES TO ANALYZE:",
+            ""
+        ]
+        
+        # Add each hunk with its context
+        for hunk in hunks:
+            prompt_parts.extend([
+                f"Hunk ID: {hunk.id}",
+                f"File: {hunk.file_path}",
+                f"Lines: {hunk.start_line}-{hunk.end_line}",
+                "",
+                "Context:",
+                hunk.context if hunk.context else f"(Context unavailable for {hunk.file_path})",
+                "",
+                "Changes:",
+                hunk.content,
+                "",
+                "---",
+                ""
+            ])
+        
+        return "\n".join(prompt_parts)
+    
     
     def display_commit_plan(self, commit_plan: List[Dict[str, Any]]):
         """Display the proposed commit plan."""
@@ -212,8 +260,40 @@ DIFF TO ANALYZE:
         for i, commit in enumerate(commit_plan, 1):
             panel_content = []
             panel_content.append(f"[bold]Message:[/bold] {commit['message']}")
-            if commit.get('files'):
+            
+            # Display hunk_ids grouped by file for readability
+            if commit.get('hunk_ids'):
+                hunk_ids = commit['hunk_ids']
+                
+                # Group hunks by file
+                hunks_by_file = {}
+                for hunk_id in hunk_ids:
+                    if ':' in hunk_id:
+                        file_path = hunk_id.split(':')[0]
+                        if file_path not in hunks_by_file:
+                            hunks_by_file[file_path] = []
+                        hunks_by_file[file_path].append(hunk_id)
+                    else:
+                        # Fallback for malformed hunk IDs
+                        if 'unknown' not in hunks_by_file:
+                            hunks_by_file['unknown'] = []
+                        hunks_by_file['unknown'].append(hunk_id)
+                
+                panel_content.append("[bold]Hunks:[/bold]")
+                for file_path, file_hunks in hunks_by_file.items():
+                    hunk_descriptions = []
+                    for hunk_id in file_hunks:
+                        if ':' in hunk_id:
+                            line_range = hunk_id.split(':')[1]
+                            hunk_descriptions.append(f"lines {line_range}")
+                        else:
+                            hunk_descriptions.append(hunk_id)
+                    panel_content.append(f"  • {file_path}: {', '.join(hunk_descriptions)}")
+            
+            # Backward compatibility: also show files if present
+            elif commit.get('files'):
                 panel_content.append(f"[bold]Files:[/bold] {', '.join(commit['files'])}")
+            
             panel_content.append(f"[bold]Rationale:[/bold] {commit['rationale']}")
             
             self.console.print(Panel(
@@ -228,8 +308,8 @@ DIFF TO ANALYZE:
         response = input("Continue? (y/N): ")
         return response.lower().strip() == 'y'
     
-    def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], base_branch: str):
-        """Apply the commit plan by resetting and recreating commits."""
+    def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], hunks: List[Hunk], full_diff: str, base_branch: str):
+        """Apply the commit plan using hunk-based staging."""
         try:
             with Progress(
                 SpinnerColumn(),
@@ -247,59 +327,83 @@ DIFF TO ANALYZE:
                 subprocess.run(['git', 'branch', backup_branch], check=True)
                 self.console.print(f"[green]Created backup branch: {backup_branch}[/green]")
                 
-                # 2. Reset to base branch
+                # 2. Create hunk ID to Hunk object mapping
+                hunks_by_id = {hunk.id: hunk for hunk in hunks}
+                
+                # 3. Reset to base branch
                 progress.update(task, description="Resetting to base branch...")
                 subprocess.run(['git', 'reset', '--soft', base_branch], check=True)
                 
-                # 3. Create new commits based on the plan
+                # 4. Create new commits based on the plan
                 progress.update(task, description="Creating new commits...")
                 
                 if commit_plan:
-                    # Unstage everything first
-                    subprocess.run(['git', 'reset', 'HEAD'], check=True, capture_output=True)
-                    
                     commits_created = 0
+                    all_applied_hunk_ids = set()
+                    
                     for i, commit in enumerate(commit_plan):
                         progress.update(task, description=f"Creating commit {i+1}/{len(commit_plan)}: {commit['message'][:50]}...")
                         
-                        # Stage only the files for this commit
-                        files_to_stage = commit.get('files', [])
-                        if files_to_stage:
-                            # Filter out files that don't exist (might have been deleted)
-                            existing_files = []
-                            for file_path in files_to_stage:
-                                result = subprocess.run(['git', 'ls-files', '--error-unmatch', file_path], 
-                                                      capture_output=True, text=True)
-                                if result.returncode == 0:
-                                    existing_files.append(file_path)
-                                else:
-                                    # Check if file exists but is untracked
-                                    if os.path.exists(file_path):
-                                        existing_files.append(file_path)
-                            
-                            if existing_files:
-                                subprocess.run(['git', 'add'] + existing_files, check=True)
+                        # Reset staging area before each commit
+                        reset_staging_area()
+                        
+                        # Get hunk IDs for this commit
+                        hunk_ids = commit.get('hunk_ids', [])
+                        
+                        # Backward compatibility: handle old format with files
+                        if not hunk_ids and commit.get('files'):
+                            # Convert files to hunk IDs by finding hunks that belong to those files
+                            file_paths = commit.get('files', [])
+                            hunk_ids = [hunk.id for hunk in hunks if hunk.file_path in file_paths]
+                        
+                        if hunk_ids:
+                            try:
+                                # Apply hunks using the hunk applicator
+                                success = apply_hunks_with_fallback(hunk_ids, hunks_by_id, full_diff)
                                 
-                                # Create the commit
-                                subprocess.run([
-                                    'git', 'commit', '-m', commit['message']
-                                ], check=True)
-                                commits_created += 1
-                            else:
-                                self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no files to stage[/yellow]")
+                                if success:
+                                    # Check if there are actually staged changes
+                                    result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
+                                                          capture_output=True, text=True)
+                                    
+                                    if result.stdout.strip():
+                                        # Create the commit
+                                        subprocess.run([
+                                            'git', 'commit', '-m', commit['message']
+                                        ], check=True)
+                                        commits_created += 1
+                                        all_applied_hunk_ids.update(hunk_ids)
+                                        self.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
+                                    else:
+                                        self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
+                                else:
+                                    self.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
+                                    
+                            except Exception as e:
+                                self.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
                         else:
-                            self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no files specified[/yellow]")
+                            self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]")
                     
-                    # Check if there are any remaining modified files that weren't included in commits
-                    result = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)
-                    if result.returncode == 0 and result.stdout.strip():
-                        # There are still unstaged changes - stage and commit them
+                    # 5. Check for remaining hunks that weren't included in any commit
+                    remaining_hunk_ids = [hunk.id for hunk in hunks if hunk.id not in all_applied_hunk_ids]
+                    
+                    if remaining_hunk_ids:
                         progress.update(task, description="Creating final commit for remaining changes...")
-                        subprocess.run(['git', 'add', '.'], check=True)
-                        subprocess.run([
-                            'git', 'commit', '-m', 'chore: remaining uncommitted changes'
-                        ], check=True)
-                        commits_created += 1
+                        reset_staging_area()
+                        
+                        try:
+                            success = apply_hunks_with_fallback(remaining_hunk_ids, hunks_by_id, full_diff)
+                            if success:
+                                result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
+                                                      capture_output=True, text=True)
+                                if result.stdout.strip():
+                                    subprocess.run([
+                                        'git', 'commit', '-m', 'chore: remaining uncommitted changes'
+                                    ], check=True)
+                                    commits_created += 1
+                                    self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
+                        except Exception as e:
+                            self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
                     
                     self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
                     self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")

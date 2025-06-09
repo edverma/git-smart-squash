@@ -14,10 +14,19 @@ class AIConfig:
     api_key_env: Optional[str] = None
 
 
+@dataclass
+class HunkConfig:
+    """Hunk-based grouping configuration."""
+    show_hunk_context: bool = True
+    context_lines: int = 3
+    max_hunks_per_prompt: int = 100
+
+
 @dataclass 
 class Config:
     """Simplified configuration."""
     ai: AIConfig
+    hunks: HunkConfig
 
 
 class ConfigManager:
@@ -75,7 +84,15 @@ class ConfigManager:
             api_key_env=config_data.get('ai', {}).get('api_key_env')
         )
         
-        return Config(ai=ai_config)
+        # Load hunk configuration
+        hunk_config_data = config_data.get('hunks', {})
+        hunk_config = HunkConfig(
+            show_hunk_context=hunk_config_data.get('show_hunk_context', True),
+            context_lines=hunk_config_data.get('context_lines', 3),
+            max_hunks_per_prompt=hunk_config_data.get('max_hunks_per_prompt', 100)
+        )
+        
+        return Config(ai=ai_config, hunks=hunk_config)
     
     def create_default_config(self, global_config: bool = False) -> str:
         """Create a default config file."""
@@ -84,6 +101,11 @@ class ConfigManager:
                 'provider': 'local',
                 'model': 'devstral',
                 'api_key_env': None
+            },
+            'hunks': {
+                'show_hunk_context': True,
+                'context_lines': 3,
+                'max_hunks_per_prompt': 100
             }
         }
         
