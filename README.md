@@ -67,6 +67,9 @@ export OPENAI_API_KEY="your-api-key"
 
 # For Anthropic  
 export ANTHROPIC_API_KEY="your-api-key"
+
+# For Google Gemini
+export GEMINI_API_KEY="your-api-key"
 ```
 
 ### 2. Navigate to Your Git Repository
@@ -120,6 +123,9 @@ git-smart-squash --ai-provider openai
 # Use Anthropic (automatically uses claude-sonnet-4-20250514)
 git-smart-squash --ai-provider anthropic
 
+# Use Google Gemini (automatically uses gemini-2.5-pro-preview-06-05)
+git-smart-squash --ai-provider gemini
+
 # Use specific model
 git-smart-squash --ai-provider openai --model gpt-4.1
 
@@ -147,6 +153,12 @@ git-smart-squash --config .custom-config.yml
 - **Setup**: Set `ANTHROPIC_API_KEY` environment variable
 - **Models**: claude-sonnet-4-20250514
 
+### Google Gemini
+- **Provider**: Google Gemini models
+- **Cost**: Pay per use
+- **Setup**: Set `GEMINI_API_KEY` environment variable
+- **Models**: gemini-2.5-pro-preview-06-05
+
 ## Configuration
 
 ### Global Configuration
@@ -155,8 +167,8 @@ Create `~/.git-smart-squash.yml`:
 
 ```yaml
 ai:
-  provider: local  # or openai, anthropic
-  model: devstral  # or gpt-4.1, claude-sonnet-4-20250514
+  provider: local  # or openai, anthropic, gemini
+  model: devstral  # or gpt-4.1, claude-sonnet-4-20250514, gemini-2.5-pro-preview-06-05
   
 output:
   backup_branch: true

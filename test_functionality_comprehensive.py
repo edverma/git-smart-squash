@@ -1042,7 +1042,8 @@ class TestConfigurationManagement(unittest.TestCase):
         test_cases = [
             ('local', 'devstral'),
             ('openai', 'gpt-4.1'),
-            ('anthropic', 'claude-3-5-sonnet-20241022'),
+            ('anthropic', 'claude-sonnet-4-20250514'),
+            ('gemini', 'gemini-2.5-pro-preview-06-05'),
             ('unknown', 'devstral')  # fallback
         ]
         
@@ -1160,7 +1161,7 @@ class TestAdvancedIntegrationScenarios(unittest.TestCase):
     def test_command_line_argument_override_behavior(self):
         """Test that command line arguments properly override configuration"""
         # Create a config with different settings
-        config = Config(ai=AIConfig(provider='anthropic', model='claude-3-5-sonnet-20241022'))
+        config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
         self.cli.config = config
         
         # Test provider override

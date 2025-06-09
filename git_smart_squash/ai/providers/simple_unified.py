@@ -35,6 +35,26 @@ class UnifiedAIProvider:
         "additionalProperties": False
     }
     
+    # Gemini-compatible schema (without additionalProperties)
+    GEMINI_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "commits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "message": {"type": "string"},
+                        "files": {"type": "array", "items": {"type": "string"}},
+                        "rationale": {"type": "string"}
+                    },
+                    "required": ["message", "files", "rationale"]
+                }
+            }
+        },
+        "required": ["commits"]
+    }
+    
     def __init__(self, config):
         self.config = config
         self.provider_type = config.ai.provider.lower()
@@ -112,6 +132,8 @@ class UnifiedAIProvider:
             return self._generate_openai(prompt)
         elif self.provider_type == "anthropic":
             return self._generate_anthropic(prompt)
+        elif self.provider_type == "gemini":
+            return self._generate_gemini(prompt)
         else:
             raise ValueError(f"Unsupported provider: {self.provider_type}")
     
@@ -197,10 +219,9 @@ class UnifiedAIProvider:
             
             # OpenAI context limits vary by model
             model_limits = {
-                'gpt-4': 8192,
-                'gpt-4-turbo': 128000, 
-                'gpt-4.1': 128000,  # Assuming this is a turbo variant
-                'gpt-3.5-turbo': 16385
+                'gpt-4.1': 1000000,
+                'gpt-4.1-mini': 1000000,
+                'gpt-4.1-nano': 1000000,
             }
             
             # Get context limit for current model, default to conservative limit
@@ -266,10 +287,9 @@ class UnifiedAIProvider:
             
             # Anthropic context limits vary by model
             model_limits = {
-                'claude-3-5-sonnet-20241022': 200000,
                 'claude-sonnet-4-20250514': 200000,  # Assuming similar to Claude 3.5
-                'claude-3-haiku': 200000,
-                'claude-3-opus': 200000
+                'claude-opus-4-20250514': 200000,
+                'claude-3-5-haiku-20241022': 200000
             }
             
             # Get context limit for current model, default to 200k
@@ -324,3 +344,88 @@ class UnifiedAIProvider:
             raise Exception("Anthropic library not installed. Run: pip install anthropic")
         except Exception as e:
             raise Exception(f"Anthropic generation failed: {e}")
+    
+    def _generate_gemini(self, prompt: str) -> str:
+        """Generate using Google Gemini API with structured output enforcement."""
+        try:
+            import google.generativeai as genai
+            
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                raise Exception("GEMINI_API_KEY environment variable not set")
+            
+            # Configure the API
+            genai.configure(api_key=api_key)
+            
+            # Calculate dynamic parameters
+            params = self._calculate_dynamic_params(prompt)
+            
+            # Gemini context limits vary by model
+            model_limits = {
+                'gemini-2.5-pro-preview-06-05': 1000000,
+                'gemini-2.5-flash-preview-05-20': 1000000,
+            }
+            
+            # Get context limit for current model, default to 32k
+            model_context_limit = model_limits.get(self.config.ai.model, 32768)
+            
+            # Check if prompt exceeds model context limit
+            if params["prompt_tokens"] > model_context_limit - 4000:  # Reserve 4000 for response
+                raise Exception(f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size.")
+            
+            # Warn if prompt is large but manageable
+            if params["prompt_tokens"] > model_context_limit * 0.8:
+                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
+            
+            # Create the model
+            model = genai.GenerativeModel(self.config.ai.model)
+            
+            # Use dynamic max_tokens, ensuring total doesn't exceed context limit
+            max_response_tokens = min(
+                params["response_tokens"], 
+                8192,  # Gemini API limit for responses
+                model_context_limit - params["prompt_tokens"] - 1000  # Safety buffer
+            )
+            
+            # Configure generation with JSON mode for structured output
+            generation_config = genai.types.GenerationConfig(
+                candidate_count=1,
+                max_output_tokens=max_response_tokens,
+                temperature=0.1,  # Lower temperature for more structured output
+                top_p=0.95,       # Higher top_p for better instruction following
+                top_k=20,         # Lower top_k for more focused responses
+                response_mime_type="application/json",  # Force JSON output
+                response_schema=self.GEMINI_SCHEMA  # Use Gemini-compatible schema
+            )
+            
+            # Generate response
+            response = model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            
+            # Check if response was blocked
+            if response.candidates[0].finish_reason.name in ['SAFETY', 'RECITATION']:
+                raise Exception(f"Gemini response blocked due to safety filters: {response.candidates[0].finish_reason}")
+            
+            # Check if response was truncated
+            if response.candidates[0].finish_reason.name == 'MAX_TOKENS':
+                print(f"Warning: Gemini response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
+            
+            # Extract structured data from response
+            response_text = response.text
+            
+            # Parse the JSON response to extract commits array
+            try:
+                parsed = json.loads(response_text)
+                if isinstance(parsed, dict) and "commits" in parsed:
+                    return json.dumps(parsed["commits"])
+                else:
+                    return response_text  # Already in array format
+            except json.JSONDecodeError:
+                return response_text  # Return as-is if not JSON
+            
+        except ImportError:
+            raise Exception("Google Generative AI library not installed. Run: pip install google-generativeai")
+        except Exception as e:
+            raise Exception(f"Google Gemini generation failed: {e}")

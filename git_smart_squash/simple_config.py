@@ -31,7 +31,8 @@ class ConfigManager:
         defaults = {
             'local': 'devstral',
             'openai': 'gpt-4.1',
-            'anthropic': 'claude-3-5-sonnet-20241022'  # Correct Claude Sonnet model name
+            'anthropic': 'claude-sonnet-4-20250514',  # Claude Sonnet 4 model
+            'gemini': 'gemini-2.5-pro-preview-06-05'  # Gemini 2.5 Pro model
         }
         return defaults.get(provider, 'devstral')
     

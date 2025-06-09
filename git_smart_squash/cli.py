@@ -68,7 +68,7 @@ class GitSmartSquashCLI:
         
         parser.add_argument(
             '--ai-provider',
-            choices=['openai', 'anthropic', 'local'],
+            choices=['openai', 'anthropic', 'local', 'gemini'],
             help='AI provider to use'
         )
         

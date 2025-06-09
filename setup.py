@@ -21,6 +21,7 @@ requirements = [
     "rich>=13.0.0", 
     "openai>=1.0.0",
     "anthropic>=0.3.0",
+    "google-generativeai>=0.8.5",
     "requests>=2.28.0",
     "tiktoken>=0.5.0",
 ]

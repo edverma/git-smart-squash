@@ -29,6 +29,10 @@ from git_smart_squash.cli import GitSmartSquashCLI
 from git_smart_squash.simple_config import Config, AIConfig, ConfigManager
 from git_smart_squash.ai.providers.simple_unified import UnifiedAIProvider
 
+# Global flags for test configuration
+TEST_NO_LOCAL = False
+TEST_CLOUD_ONLY = False
+
 
 class TestOllamaServerAvailability(unittest.TestCase):
     """Test that Ollama server is available and working."""
@@ -78,23 +82,25 @@ class TestAllProvidersTokenLimits(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514')),
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'))
         }
         
     def _get_available_providers(self):
         """Check which providers are available for testing."""
         available = []
         
-        # Check Ollama
-        try:
-            result = subprocess.run([
-                "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
-            ], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                available.append('local')
-        except:
-            pass
-            
+        # Check Ollama (unless skipped by flags)
+        if not TEST_CLOUD_ONLY:
+            try:
+                result = subprocess.run([
+                    "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
+                ], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and not TEST_NO_LOCAL:
+                    available.append('local')
+            except:
+                pass
+                
         # Check OpenAI
         if os.getenv('OPENAI_API_KEY'):
             available.append('openai')
@@ -102,6 +108,10 @@ class TestAllProvidersTokenLimits(unittest.TestCase):
         # Check Anthropic
         if os.getenv('ANTHROPIC_API_KEY'):
             available.append('anthropic')
+            
+        # Check Gemini
+        if os.getenv('GEMINI_API_KEY'):
+            available.append('gemini')
             
         return available
 
@@ -176,23 +186,25 @@ class TestAllProvidersRealResponses(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514')),
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'))
         }
         
     def _get_available_providers(self):
         """Check which providers are available for testing."""
         available = []
         
-        # Check Ollama
-        try:
-            result = subprocess.run([
-                "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
-            ], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                available.append('local')
-        except:
-            pass
-            
+        # Check Ollama (unless skipped by flags)
+        if not TEST_CLOUD_ONLY:
+            try:
+                result = subprocess.run([
+                    "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
+                ], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and not TEST_NO_LOCAL:
+                    available.append('local')
+            except:
+                pass
+                
         # Check OpenAI
         if os.getenv('OPENAI_API_KEY'):
             available.append('openai')
@@ -200,6 +212,10 @@ class TestAllProvidersRealResponses(unittest.TestCase):
         # Check Anthropic
         if os.getenv('ANTHROPIC_API_KEY'):
             available.append('anthropic')
+
+        # Check Gemini
+        if os.getenv('GEMINI_API_KEY'):
+            available.append('gemini')
             
         return available
 
@@ -269,6 +285,8 @@ Here's the diff to analyze:
                         response = provider._generate_openai(prompt)
                     elif provider_name == 'anthropic':
                         response = provider._generate_anthropic(prompt)
+                    elif provider_name == 'gemini':
+                        response = provider._generate_gemini(prompt)
                     
                     # Verify response is not empty
                     self.assertIsNotNone(response)
@@ -424,6 +442,8 @@ Here's the diff to analyze:
                         response = provider._generate_openai(prompt)
                     elif provider_name == 'anthropic':
                         response = provider._generate_anthropic(prompt)
+                    elif provider_name == 'gemini':
+                        response = provider._generate_gemini(prompt)
                     
                     self.assertIsNotNone(response)
                     self.assertGreater(len(response), 0)
@@ -510,6 +530,8 @@ Here's the diff:
                         response = provider._generate_openai(prompt)
                     elif provider_name == 'anthropic':
                         response = provider._generate_anthropic(prompt)
+                    elif provider_name == 'gemini':
+                        response = provider._generate_gemini(prompt)
                     
                     end_time = time.time()
                     
@@ -551,7 +573,8 @@ class TestAllProvidersIntegrationWithCLI(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514')),
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'))
         }
         
     def _get_available_providers(self):
@@ -732,7 +755,8 @@ class TestStructuredOutputValidation(unittest.TestCase):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral')),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1')),
-            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+            'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514')),
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'))
         }
     
     def _get_available_providers(self):
@@ -751,6 +775,8 @@ class TestStructuredOutputValidation(unittest.TestCase):
             available.append('openai')
         if os.getenv('ANTHROPIC_API_KEY'):
             available.append('anthropic')
+        if os.getenv('GEMINI_API_KEY'):
+            available.append('gemini')
         return available
     
     def test_json_schema_enforcement(self):
@@ -773,6 +799,8 @@ class TestStructuredOutputValidation(unittest.TestCase):
                         response = provider._generate_openai(test_prompt)
                     elif provider_name == 'anthropic':
                         response = provider._generate_anthropic(test_prompt)
+                    elif provider_name == 'gemini':
+                        response = provider._generate_gemini(test_prompt)
                     
                     # Must be valid JSON array
                     parsed = json.loads(response)
@@ -981,7 +1009,8 @@ class TestConcurrentProviderOperations(unittest.TestCase):
         self.providers = {
             'local': UnifiedAIProvider(Config(ai=AIConfig(provider='local'))),
             'openai': UnifiedAIProvider(Config(ai=AIConfig(provider='openai'))),
-            'anthropic': UnifiedAIProvider(Config(ai=AIConfig(provider='anthropic')))
+            'anthropic': UnifiedAIProvider(Config(ai=AIConfig(provider='anthropic'))),
+            'gemini': UnifiedAIProvider(Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05')))
         }
     
     def test_provider_isolation(self):
@@ -1178,36 +1207,58 @@ class TestCLIRobustness(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run AI integration tests')
+    parser.add_argument('--no-local', action='store_true', 
+                       help='Skip local model tests (Ollama)')
+    parser.add_argument('--cloud-only', action='store_true',
+                       help='Run only cloud provider tests (OpenAI, Anthropic, Gemini)')
+    args = parser.parse_args()
+    
+    # Set global flags
+    globals()['TEST_NO_LOCAL'] = args.no_local
+    globals()['TEST_CLOUD_ONLY'] = args.cloud_only
+    
     print("Running AI integration tests for all providers...")
     print("Requirements:")
-    print("- For Ollama: server running on localhost:11434 with devstral model")
+    if not args.no_local and not args.cloud_only:
+        print("- For Ollama: server running on localhost:11434 with devstral model")
     print("- For OpenAI: OPENAI_API_KEY environment variable set") 
     print("- For Anthropic: ANTHROPIC_API_KEY environment variable set")
+    print("- For Google Gemini: GEMINI_API_KEY environment variable set")
     print("- Network connectivity for cloud providers")
     print()
     
     # Check available providers
     available_providers = []
     
-    # Check Ollama
-    try:
-        result = subprocess.run([
-            "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
-        ], capture_output=True, text=True, timeout=5)
-        
-        if result.returncode == 0:
-            print("✓ Ollama server is running")
-            response = json.loads(result.stdout)
-            models = [m['name'] for m in response.get('models', [])]
-            print(f"✓ Available Ollama models: {models}")
-            available_providers.append('local')
-        else:
-            print("✗ Ollama server not accessible")
-            print("  Start with: ollama serve && ollama pull devstral")
+    # Check Ollama (unless skipped)
+    if not args.cloud_only:
+        try:
+            result = subprocess.run([
+                "curl", "-s", "-X", "GET", "http://localhost:11434/api/tags"
+            ], capture_output=True, text=True, timeout=5)
             
-    except Exception as e:
-        print(f"✗ Cannot connect to Ollama: {e}")
-        print("  Start with: ollama serve && ollama pull devstral")
+            if result.returncode == 0 and not args.no_local:
+                print("✓ Ollama server is running")
+                response = json.loads(result.stdout)
+                models = [m['name'] for m in response.get('models', [])]
+                print(f"✓ Available Ollama models: {models}")
+                available_providers.append('local')
+            elif args.no_local:
+                print("⏭️  Skipping Ollama tests (--no-local flag)")
+            else:
+                print("✗ Ollama server not accessible")
+                print("  Start with: ollama serve && ollama pull devstral")
+                
+        except Exception as e:
+            if not args.no_local:
+                print(f"✗ Cannot connect to Ollama: {e}")
+                print("  Start with: ollama serve && ollama pull devstral")
+            else:
+                print("⏭️  Skipping Ollama tests (--no-local flag)")
     
     # Check OpenAI
     if os.getenv('OPENAI_API_KEY'):
@@ -1224,6 +1275,13 @@ if __name__ == '__main__':
     else:
         print("✗ Anthropic API key not found")
         print("  Set with: export ANTHROPIC_API_KEY=your_key_here")
+
+    if os.getenv('GEMINI_API_KEY'):
+        print("✓ Google Gemini API key found")
+        available_providers.append('gemini')
+    else:
+        print("✗ Google Gemini API key not found")
+        print("  Set with: export GEMINI_API_KEY=your_key_here")
     
     if available_providers:
         print(f"\n🚀 Running tests with providers: {', '.join(available_providers)}")
