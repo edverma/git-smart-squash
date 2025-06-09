@@ -80,6 +80,8 @@ def _apply_patch_to_staging(patch_content: str) -> bool:
             
             if result.returncode != 0:
                 print(f"Git apply failed: {result.stderr}")
+                # Debug: also print the patch content for troubleshooting
+                print(f"Debug: Patch content (first 500 chars):\n{patch_content[:500]}")
                 return False
             
             return True
@@ -98,7 +100,7 @@ def _apply_patch_to_staging(patch_content: str) -> bool:
 
 def apply_hunks_with_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: str) -> bool:
     """
-    Apply hunks with fallback to file-based staging if hunk application fails.
+    Apply hunks using the hunk-based approach only.
     
     Args:
         hunk_ids: List of hunk IDs to apply
@@ -108,13 +110,7 @@ def apply_hunks_with_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk],
     Returns:
         True if successful, False otherwise
     """
-    try:
-        # First try hunk-based application
-        return apply_hunks(hunk_ids, hunks_by_id, base_diff)
-    except HunkApplicatorError:
-        # Fallback to file-based staging
-        print("Hunk application failed, falling back to file-based staging...")
-        return _apply_files_fallback(hunk_ids, hunks_by_id)
+    return apply_hunks(hunk_ids, hunks_by_id, base_diff)
 
 
 def _apply_files_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk]) -> bool:

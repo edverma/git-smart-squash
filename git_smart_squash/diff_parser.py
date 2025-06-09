@@ -161,31 +161,58 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
             hunks_by_file[hunk.file_path] = []
         hunks_by_file[hunk.file_path].append(hunk)
     
-    patch_lines = []
+    # Parse the base diff to extract file headers
     base_lines = base_diff.split('\n')
+    file_headers = {}
+    
+    i = 0
+    while i < len(base_lines):
+        line = base_lines[i]
+        if line.startswith('diff --git'):
+            # Extract file path from diff header
+            match = re.match(r'diff --git a/(.*) b/(.*)', line)
+            if match:
+                file_path = match.group(2)
+                header_lines = [line]
+                i += 1
+                
+                # Collect all header lines until first @@ or next diff
+                while i < len(base_lines):
+                    next_line = base_lines[i]
+                    if next_line.startswith('@@') or next_line.startswith('diff --git'):
+                        break
+                    header_lines.append(next_line)
+                    i += 1
+                
+                file_headers[file_path] = header_lines
+                continue
+        i += 1
+    
+    # Build the patch
+    patch_parts = []
     
     for file_path, file_hunks in hunks_by_file.items():
-        # Find the file header in the original diff
-        file_header_start = None
-        for i, line in enumerate(base_lines):
-            if line.startswith('diff --git') and file_path in line:
-                file_header_start = i
-                break
+        # Add file header
+        if file_path in file_headers:
+            patch_parts.extend(file_headers[file_path])
+        else:
+            # Fallback header if not found in base diff
+            patch_parts.extend([
+                f"diff --git a/{file_path} b/{file_path}",
+                f"index 0000000..1111111 100644",
+                f"--- a/{file_path}",
+                f"+++ b/{file_path}"
+            ])
         
-        if file_header_start is None:
-            continue
-        
-        # Add file header lines (diff --git, index, ---, +++)
-        j = file_header_start
-        while j < len(base_lines) and not base_lines[j].startswith('@@'):
-            patch_lines.append(base_lines[j])
-            j += 1
-        
-        # Add the hunks for this file
+        # Add hunks for this file
         for hunk in sorted(file_hunks, key=lambda h: h.start_line):
-            patch_lines.append(hunk.content)
+            # Split hunk content and add each line
+            hunk_lines = hunk.content.split('\n')
+            for line in hunk_lines:
+                if line:  # Skip completely empty lines
+                    patch_parts.append(line)
     
-    return '\n'.join(patch_lines)
+    return '\n'.join(patch_parts) + '\n' if patch_parts else ""
 
 
 def validate_hunk_combination(hunks: List[Hunk]) -> Tuple[bool, str]:
