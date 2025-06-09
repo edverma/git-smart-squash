@@ -152,7 +152,7 @@ def get_hunk_context(file_path: str, start_line: int, end_line: int, context_lin
 
 def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
     """
-    Create a patch file containing only the specified hunks.
+    Create a patch file containing only the specified hunks with proper line number calculation.
     
     Args:
         hunks: List of hunks to include in the patch
@@ -224,32 +224,63 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
         # Sort hunks and validate before adding
         sorted_hunks = sorted(file_hunks, key=lambda h: h.start_line)
         
-        # Check for potential issues with line number jumps
-        for i, hunk in enumerate(sorted_hunks):
-            hunk_lines = hunk.content.split('\n')
+        # Use dependency-aware patch generation
+        if len(sorted_hunks) > 1:
+            # Multiple hunks in same file - use dependency-aware line number calculation
+            adjustments = _calculate_line_number_adjustments(sorted_hunks)
             
-            # Validate hunk format
-            if hunk_lines and hunk_lines[0].startswith('@@'):
-                # Check if the hunk header has reasonable line numbers
-                hunk_header = hunk_lines[0]
-                if not _validate_hunk_header(hunk_header):
-                    print(f"Warning: Invalid hunk header detected: {hunk_header}")
-                    # Try to reconstruct a valid header
-                    reconstructed_header = _reconstruct_hunk_header(hunk, hunk_lines)
-                    if reconstructed_header:
-                        hunk_lines[0] = reconstructed_header
-                        print(f"✓ Reconstructed header: {reconstructed_header}")
-                    else:
-                        print(f"Error: Could not reconstruct valid header for hunk {hunk.id}, creating minimal fallback")
-                        # Create a minimal fallback header that git can understand
-                        fallback_header = _create_fallback_header(hunk, hunk_lines)
-                        hunk_lines[0] = fallback_header
-                        print(f"✓ Created fallback header: {fallback_header}")
-            
-            # Add the hunk lines
-            for line in hunk_lines:
-                if line:  # Skip completely empty lines
-                    patch_parts.append(line)
+            for hunk in sorted_hunks:
+                adjusted_old_start, adjusted_new_start = adjustments[hunk.id]
+                hunk_lines = hunk.content.split('\n')
+                
+                if hunk_lines and hunk_lines[0].startswith('@@'):
+                    # Recalculate header with proper line numbers
+                    additions, deletions = _count_hunk_changes(hunk)
+                    context = sum(1 for line in hunk_lines[1:] if line.startswith(' '))
+                    
+                    old_count = deletions + context
+                    new_count = additions + context
+                    
+                    # Create corrected header
+                    corrected_header = f"@@ -{adjusted_old_start},{old_count} +{adjusted_new_start},{new_count} @@"
+                    
+                    # Preserve any context from original header
+                    if '@@' in hunk_lines[0]:
+                        parts = hunk_lines[0].split('@@')
+                        if len(parts) >= 3:
+                            corrected_header += f" {parts[2]}"
+                    
+                    hunk_lines[0] = corrected_header
+                
+                # Add corrected hunk
+                for line in hunk_lines:
+                    if line:
+                        patch_parts.append(line)
+        else:
+            # Single hunk - use original logic with validation
+            for hunk in sorted_hunks:
+                hunk_lines = hunk.content.split('\n')
+                
+                # Validate hunk format
+                if hunk_lines and hunk_lines[0].startswith('@@'):
+                    hunk_header = hunk_lines[0]
+                    if not _validate_hunk_header(hunk_header):
+                        print(f"Warning: Invalid hunk header detected: {hunk_header}")
+                        # Try to reconstruct a valid header
+                        reconstructed_header = _reconstruct_hunk_header(hunk, hunk_lines)
+                        if reconstructed_header:
+                            hunk_lines[0] = reconstructed_header
+                            print(f"✓ Reconstructed header: {reconstructed_header}")
+                        else:
+                            print(f"Error: Could not reconstruct valid header for hunk {hunk.id}, creating minimal fallback")
+                            fallback_header = _create_fallback_header(hunk, hunk_lines)
+                            hunk_lines[0] = fallback_header
+                            print(f"✓ Created fallback header: {fallback_header}")
+                
+                # Add the hunk lines
+                for line in hunk_lines:
+                    if line:  # Skip completely empty lines
+                        patch_parts.append(line)
     
     return '\n'.join(patch_parts) + '\n' if patch_parts else ""
 
@@ -568,7 +599,7 @@ def create_dependency_groups(hunks: List[Hunk]) -> List[List[Hunk]]:
 
 def _validate_hunk_header(header: str) -> bool:
     """
-    Validate that a hunk header has reasonable line numbers.
+    Validate that a hunk header has reasonable format.
     
     Args:
         header: The hunk header line starting with @@
@@ -585,24 +616,14 @@ def _validate_hunk_header(header: str) -> bool:
     new_start = int(match.group(3))
     new_count = int(match.group(4)) if match.group(4) else 1
     
-    # Fundamental issue: Line number changes indicate missing context
-    # When old_start and new_start differ significantly, it means other changes
-    # in the file have shifted line numbers, making this hunk dependent on those changes
-    line_shift = old_start - new_start
-    
-    # If the line shift is greater than what this hunk accounts for,
-    # it means this hunk depends on other changes not included in its content
-    if line_shift > old_count:
-        # This hunk cannot be applied in isolation because it references
-        # line numbers that assume other changes have already been applied
+    # Basic sanity checks
+    if old_start < 0 or new_start < 0:
         return False
     
-    # Similarly, if new file has more lines than old (negative shift),
-    # but this hunk doesn't account for those additions
-    if line_shift < 0 and abs(line_shift) > new_count:
+    if old_count < 0 or new_count < 0:
         return False
     
-    # Check for zero counts (invalid)
+    # Both counts can't be zero
     if old_count == 0 and new_count == 0:
         return False
     
@@ -611,7 +632,7 @@ def _validate_hunk_header(header: str) -> bool:
 
 def _reconstruct_hunk_header(hunk: Hunk, hunk_lines: List[str]) -> Optional[str]:
     """
-    Try to reconstruct a valid hunk header from the hunk content.
+    Try to reconstruct a valid hunk header from the hunk content with proper line number calculation.
     
     Args:
         hunk: The Hunk object
@@ -629,9 +650,16 @@ def _reconstruct_hunk_header(hunk: Hunk, hunk_lines: List[str]) -> Optional[str]
     old_count = deletions + context
     new_count = additions + context
     
-    # Use hunk metadata for start lines
-    old_start = max(1, hunk.start_line - context // 2)
+    # For proper git patches, we need to calculate line numbers that account for
+    # the actual position in the CURRENT state, not the original diff state
+    old_start = max(1, hunk.start_line)
     new_start = hunk.start_line
+    
+    # If we have sufficient context, adjust start positions
+    if context > 0:
+        context_offset = min(3, context // 2)  # Use up to 3 lines of leading context
+        old_start = max(1, old_start - context_offset)
+        new_start = max(1, new_start - context_offset)
     
     # Build header
     header = f"@@ -{old_start},{old_count} +{new_start},{new_count} @@"
@@ -728,3 +756,166 @@ def _create_fallback_header(hunk: Hunk, hunk_lines: List[str]) -> str:
         new_count = 1
     
     return f"@@ -{old_start},{old_count} +{new_start},{new_count} @@"
+
+
+def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, Tuple[int, int]]:
+    """
+    Calculate line number adjustments for interdependent hunks in the same file.
+    
+    Args:
+        hunks_for_file: List of hunks affecting the same file
+        
+    Returns:
+        Dictionary mapping hunk ID to (adjusted_old_start, adjusted_new_start)
+    """
+    # Sort hunks by original start line
+    sorted_hunks = sorted(hunks_for_file, key=lambda h: h.start_line)
+    
+    adjustments = {}
+    cumulative_shift = 0
+    
+    for hunk in sorted_hunks:
+        # Calculate this hunk's effect on line numbers
+        additions, deletions = _count_hunk_changes(hunk)
+        line_shift = additions - deletions
+        
+        # Adjust this hunk's start position based on previous changes
+        adjusted_old_start = hunk.start_line
+        adjusted_new_start = hunk.start_line + cumulative_shift
+        
+        adjustments[hunk.id] = (adjusted_old_start, adjusted_new_start)
+        
+        # Update cumulative shift for subsequent hunks
+        cumulative_shift += line_shift
+    
+    return adjustments
+
+
+def _count_hunk_changes(hunk: Hunk) -> Tuple[int, int]:
+    """
+    Count additions and deletions in a hunk.
+    
+    Args:
+        hunk: The hunk to analyze
+        
+    Returns:
+        Tuple of (additions, deletions)
+    """
+    lines = hunk.content.split('\n')
+    additions = sum(1 for line in lines if line.startswith('+') and not line.startswith('+++'))
+    deletions = sum(1 for line in lines if line.startswith('-') and not line.startswith('---'))
+    return additions, deletions
+
+
+def _create_valid_git_patch(hunks: List[Hunk], base_diff: str) -> str:
+    """
+    Create a valid git patch with corrected line numbers for interdependent hunks.
+    
+    Args:
+        hunks: List of hunks to include
+        base_diff: Original diff for header extraction
+        
+    Returns:
+        Valid patch content for git apply
+    """
+    if not hunks:
+        return ""
+    
+    # Group hunks by file
+    hunks_by_file = {}
+    for hunk in hunks:
+        if hunk.file_path not in hunks_by_file:
+            hunks_by_file[hunk.file_path] = []
+        hunks_by_file[hunk.file_path].append(hunk)
+    
+    # Extract original file headers
+    original_headers = _extract_original_headers(base_diff)
+    
+    patch_parts = []
+    
+    for file_path, file_hunks in hunks_by_file.items():
+        # Add file header
+        if file_path in original_headers:
+            patch_parts.extend(original_headers[file_path])
+        else:
+            # Create fallback header
+            patch_parts.extend([
+                f"diff --git a/{file_path} b/{file_path}",
+                f"index 0000000..1111111 100644",
+                f"--- a/{file_path}",
+                f"+++ b/{file_path}"
+            ])
+        
+        # Calculate line number adjustments for this file
+        adjustments = _calculate_line_number_adjustments(file_hunks)
+        
+        # Apply hunks with corrected line numbers
+        for hunk in sorted(file_hunks, key=lambda h: h.start_line):
+            adjusted_old_start, adjusted_new_start = adjustments[hunk.id]
+            
+            # Reconstruct hunk with proper line numbers
+            hunk_lines = hunk.content.split('\n')
+            
+            if hunk_lines and hunk_lines[0].startswith('@@'):
+                # Count content for proper header
+                additions, deletions = _count_hunk_changes(hunk)
+                context = sum(1 for line in hunk_lines[1:] if line.startswith(' '))
+                
+                old_count = deletions + context
+                new_count = additions + context
+                
+                # Create corrected header
+                corrected_header = f"@@ -{adjusted_old_start},{old_count} +{adjusted_new_start},{new_count} @@"
+                
+                # Add context from original if present
+                if '@@' in hunk_lines[0]:
+                    parts = hunk_lines[0].split('@@')
+                    if len(parts) >= 3:
+                        corrected_header += f" {parts[2]}"
+                
+                hunk_lines[0] = corrected_header
+            
+            # Add corrected hunk to patch
+            for line in hunk_lines:
+                if line:
+                    patch_parts.append(line)
+    
+    return '\n'.join(patch_parts) + '\n' if patch_parts else ""
+
+
+def _extract_original_headers(base_diff: str) -> Dict[str, List[str]]:
+    """
+    Extract original file headers from the base diff.
+    
+    Args:
+        base_diff: Original full diff output
+        
+    Returns:
+        Dictionary mapping file paths to their header lines
+    """
+    headers = {}
+    lines = base_diff.split('\n')
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith('diff --git'):
+            # Extract file path
+            match = re.match(r'diff --git a/(.*) b/(.*)', line)
+            if match:
+                file_path = match.group(2)
+                header_lines = [line]
+                i += 1
+                
+                # Collect header lines until first @@
+                while i < len(lines) and not lines[i].startswith('@@'):
+                    if lines[i].startswith('diff --git'):
+                        break
+                    header_lines.append(lines[i])
+                    i += 1
+                
+                headers[file_path] = header_lines
+                continue
+        i += 1
+    
+    return headers

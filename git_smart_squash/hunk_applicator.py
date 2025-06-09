@@ -98,7 +98,7 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
 
 def _apply_dependency_group_atomically(hunks: List[Hunk], base_diff: str) -> bool:
     """
-    Apply a dependency group using direct file modification (no patch generation).
+    Apply a dependency group using git's native patch application with proper line number calculation.
     
     Args:
         hunks: List of hunks in the dependency group
@@ -108,20 +108,16 @@ def _apply_dependency_group_atomically(hunks: List[Hunk], base_diff: str) -> boo
         True if successful, False otherwise
     """
     try:
-        # Apply all hunks using direct file modification
-        for hunk in hunks:
-            additions, deletions, context_lines = _parse_hunk_content(hunk)
-            
-            if _is_file_operation_hunk(hunk):
-                success = _apply_file_operation_hunk(hunk, additions, deletions)
-            else:
-                success = _apply_direct_file_modification(hunk, additions, deletions, context_lines)
-            
-            if not success:
-                print(f"Failed to apply hunk {hunk.id} in atomic group")
-                return False
+        # Generate valid patch with corrected line numbers
+        from .diff_parser import _create_valid_git_patch
+        patch_content = _create_valid_git_patch(hunks, base_diff)
         
-        return True
+        if not patch_content.strip():
+            print("No valid patch content generated")
+            return False
+        
+        # Apply using git's native mechanism  
+        return _apply_patch_with_git(patch_content)
         
     except Exception as e:
         print(f"Error in atomic application: {e}")
@@ -130,7 +126,7 @@ def _apply_dependency_group_atomically(hunks: List[Hunk], base_diff: str) -> boo
 
 def _apply_dependency_group_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
     """
-    Apply hunks in a dependency group sequentially with smart ordering.
+    Apply hunks in a dependency group sequentially using git native mechanisms.
     
     Args:
         hunks: List of hunks in the dependency group
@@ -146,13 +142,12 @@ def _apply_dependency_group_sequentially(hunks: List[Hunk], base_diff: str) -> b
         # Fallback to simple ordering if topological sort fails
         ordered_hunks = sorted(hunks, key=lambda h: (h.file_path, h.start_line))
     
-    # Apply hunks in dependency order
+    # Apply hunks in dependency order using git native mechanisms
     for i, hunk in enumerate(ordered_hunks):
         try:
-            # Use intelligent relocation instead of rigid validation
             success = _relocate_and_apply_hunk(hunk, base_diff)
             if not success:
-                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(ordered_hunks)}) after relocation")
+                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(ordered_hunks)}) via git apply")
                 return False
             
         except Exception as e:
@@ -209,7 +204,7 @@ def _topological_sort_hunks(hunks: List[Hunk]) -> List[Hunk]:
 
 def _apply_hunks_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
     """
-    Apply hunks one by one using direct file modification for better reliability.
+    Apply hunks one by one using git native mechanisms for better reliability.
     
     Args:
         hunks: List of hunks to apply
@@ -223,10 +218,10 @@ def _apply_hunks_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
     
     for i, hunk in enumerate(sorted_hunks):
         try:
-            # Use direct file modification instead of patch generation
+            # Use git native patch application
             success = _relocate_and_apply_hunk(hunk, base_diff)
             if not success:
-                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(sorted_hunks)}) via direct modification")
+                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(sorted_hunks)}) via git apply")
                 return False
             
         except Exception as e:
@@ -252,10 +247,112 @@ def _apply_hunks_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
 # Direct file modification provides immediate success/failure feedback.
 
 
+def _apply_patch_with_git(patch_content: str) -> bool:
+    """
+    Apply a patch using git's native mechanism.
+    
+    Args:
+        patch_content: The patch content to apply
+        
+    Returns:
+        True if successfully applied, False otherwise
+    """
+    try:
+        # Save current staging state for rollback
+        staging_state = _save_staging_state()
+        
+        # Create temporary patch file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as patch_file:
+            patch_file.write(patch_content)
+            patch_file_path = patch_file.name
+        
+        try:
+            # Apply patch using git apply --cached for atomic staging
+            result = subprocess.run(
+                ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
+                capture_output=True,
+                text=True,
+                cwd=os.getcwd()
+            )
+            
+            if result.returncode == 0:
+                print("✓ Patch applied successfully via git apply")
+                return True
+            else:
+                print(f"Git apply failed: {result.stderr}")
+                # Rollback staging state
+                _restore_staging_state(staging_state)
+                return False
+                
+        finally:
+            # Clean up temporary file
+            os.unlink(patch_file_path)
+            
+    except Exception as e:
+        print(f"Error applying patch with git: {e}")
+        return False
+
+
+def _save_staging_state() -> Optional[str]:
+    """
+    Save current staging state for rollback.
+    
+    Returns:
+        Staging state identifier or None if unable to save
+    """
+    try:
+        # Get current staged diff
+        result = subprocess.run(
+            ['git', 'diff', '--cached'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout
+    except:
+        return None
+
+
+def _restore_staging_state(saved_state: Optional[str]) -> bool:
+    """
+    Restore staging state from saved state.
+    
+    Args:
+        saved_state: Previously saved staging state
+        
+    Returns:
+        True if restoration successful
+    """
+    try:
+        if saved_state is None:
+            return True
+            
+        # Reset staging area
+        subprocess.run(['git', 'reset', 'HEAD'], capture_output=True, check=True)
+        
+        # If there was staged content, reapply it
+        if saved_state.strip():
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as patch_file:
+                patch_file.write(saved_state)
+                patch_file_path = patch_file.name
+            
+            try:
+                subprocess.run(
+                    ['git', 'apply', '--cached', patch_file_path],
+                    capture_output=True,
+                    check=True
+                )
+            finally:
+                os.unlink(patch_file_path)
+        
+        return True
+    except:
+        return False
+
+
 def _relocate_and_apply_hunk(hunk: Hunk, base_diff: str) -> bool:
     """
-    Apply a hunk using direct file modification instead of patch generation.
-    This solves the fundamental patch corruption issues.
+    Apply a hunk using git's native patch application instead of direct file modification.
     
     Args:
         hunk: The hunk to apply
@@ -265,15 +362,16 @@ def _relocate_and_apply_hunk(hunk: Hunk, base_diff: str) -> bool:
         True if successfully applied, False otherwise
     """
     try:
-        # Step 1: Parse the hunk to understand semantic changes
-        additions, deletions, context_lines = _parse_hunk_content(hunk)
+        # Generate valid patch for single hunk
+        from .diff_parser import _create_valid_git_patch
+        patch_content = _create_valid_git_patch([hunk], base_diff)
         
-        # Step 2: Handle file operations (creation/deletion) specially
-        if _is_file_operation_hunk(hunk):
-            return _apply_file_operation_hunk(hunk, additions, deletions)
+        if not patch_content.strip():
+            print(f"Could not generate valid patch for hunk {hunk.id}")
+            return False
         
-        # Step 3: Apply changes directly to file content
-        return _apply_direct_file_modification(hunk, additions, deletions, context_lines)
+        # Apply using git's native mechanism
+        return _apply_patch_with_git(patch_content)
         
     except Exception as e:
         print(f"Error applying hunk {hunk.id}: {e}")
@@ -390,8 +488,8 @@ def _apply_file_operation_hunk(hunk: Hunk, additions: list, deletions: list) -> 
 
 def _apply_direct_file_modification(hunk: Hunk, additions: list, deletions: list, context_lines: list) -> bool:
     """
-    Apply hunk changes directly to file content instead of using patch generation.
-    This avoids all the patch corruption issues.
+    DEPRECATED: Apply hunk changes directly to file content.
+    This function is deprecated in favor of git native patch application.
     
     Args:
         hunk: The hunk to apply
@@ -400,76 +498,10 @@ def _apply_direct_file_modification(hunk: Hunk, additions: list, deletions: list
         context_lines: Context lines from the hunk
         
     Returns:
-        True if successfully applied
+        Always returns False to force fallback to git native mechanisms
     """
-    try:
-        # Read current file content
-        with open(hunk.file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            current_lines = [line.rstrip('\n') for line in f.readlines()]
-    except (FileNotFoundError, IOError):
-        print(f"Could not read file {hunk.file_path}")
-        return False
-    
-    modified_lines = current_lines[:]
-    
-    # Strategy 1: Find and remove deletion lines
-    if deletions:
-        for deletion in deletions:
-            deletion_stripped = deletion.strip()
-            if deletion_stripped:  # Skip empty deletions
-                # Find this line in the current file
-                for i, current_line in enumerate(modified_lines):
-                    if current_line.strip() == deletion_stripped:
-                        # Remove this line
-                        modified_lines.pop(i)
-                        break
-                else:
-                    # Fuzzy match if exact match fails
-                    for i, current_line in enumerate(modified_lines):
-                        if deletion_stripped in current_line.strip() or current_line.strip() in deletion_stripped:
-                            modified_lines.pop(i)
-                            break
-    
-    # Strategy 2: Add addition lines
-    if additions:
-        # Find the best place to insert additions
-        insert_position = len(modified_lines)  # Default to end
-        
-        # If we have context or deletion patterns, try to be smarter about placement
-        if deletions or context_lines:
-            # Look for surrounding context to place additions
-            reference_lines = context_lines if context_lines else (deletions if deletions else [])
-            if reference_lines:
-                for i, current_line in enumerate(modified_lines):
-                    for ref_line in reference_lines:
-                        if ref_line.strip() and (ref_line.strip() in current_line.strip() or current_line.strip() in ref_line.strip()):
-                            insert_position = i + 1
-                            break
-                    if insert_position != len(modified_lines):
-                        break
-        
-        # Insert additions at the determined position
-        for j, addition in enumerate(additions):
-            if addition.strip():  # Skip empty additions
-                modified_lines.insert(insert_position + j, addition)
-    
-    # Write the modified content back to the file
-    try:
-        with open(hunk.file_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(modified_lines) + ('\n' if modified_lines else ''))
-        
-        # Stage the modified file
-        result = subprocess.run(['git', 'add', hunk.file_path], capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"✓ Applied hunk {hunk.id} via direct file modification")
-            return True
-        else:
-            print(f"Failed to stage modified file {hunk.file_path}: {result.stderr}")
-            return False
-            
-    except Exception as e:
-        print(f"Error writing modified file {hunk.file_path}: {e}")
-        return False
+    print("Warning: _apply_direct_file_modification is deprecated. Use git native mechanisms instead.")
+    return False
 
 
 def _lines_match_fuzzy(file_lines: list, target_lines: list, threshold: float = 0.7) -> bool:
