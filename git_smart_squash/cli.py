@@ -332,7 +332,9 @@ class GitSmartSquashCLI:
                 
                 # 3. Reset to base branch
                 progress.update(task, description="Resetting to base branch...")
-                subprocess.run(['git', 'reset', '--soft', base_branch], check=True)
+                # Use --hard reset to ensure working directory is clean
+                # This is safe because we've already created a backup branch
+                subprocess.run(['git', 'reset', '--hard', base_branch], check=True)
                 
                 # 4. Create new commits based on the plan
                 progress.update(task, description="Creating new commits...")

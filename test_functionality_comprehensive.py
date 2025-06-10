@@ -204,7 +204,7 @@ class TestCoreConceptFourSteps(unittest.TestCase):
                     mock_run.side_effect = [
                         MagicMock(stdout='feature-auth\n', returncode=0),  # get current branch
                         MagicMock(returncode=0),  # create backup branch
-                        MagicMock(returncode=0),  # git reset --soft main
+                        MagicMock(returncode=0),  # git reset --hard main
                         MagicMock(stdout='test.py\n', returncode=0),  # git diff --cached --name-only
                         MagicMock(returncode=0),  # git commit
                         MagicMock(stdout='', returncode=0),  # git status --porcelain (check remaining)
@@ -221,15 +221,15 @@ class TestCoreConceptFourSteps(unittest.TestCase):
                     # Verify git commands are used
                     calls = mock_run.call_args_list
                     
-                    # Check git reset --soft specifically
+                    # Check git reset --hard specifically
                     reset_call = None
                     for call in calls:
-                        if 'reset' in str(call) and '--soft' in str(call):
+                        if 'reset' in str(call) and '--hard' in str(call):
                             reset_call = call
                             break
                     
-                    self.assertIsNotNone(reset_call, "git reset --soft command not found")
-                    self.assertIn('--soft', str(reset_call))
+                    self.assertIsNotNone(reset_call, "git reset --hard command not found")
+                    self.assertIn('--hard', str(reset_call))
                     self.assertIn('main', str(reset_call))
         
         # Test backward compatibility with file-based commits in a separate test context
@@ -241,7 +241,7 @@ class TestCoreConceptFourSteps(unittest.TestCase):
                     mock_run.side_effect = [
                         MagicMock(stdout='feature-auth\n', returncode=0),  # get current branch
                         MagicMock(returncode=0),  # create backup branch
-                        MagicMock(returncode=0),  # git reset --soft main
+                        MagicMock(returncode=0),  # git reset --hard main
                         MagicMock(stdout='test.py\n', returncode=0),  # git diff --cached --name-only
                         MagicMock(returncode=0),  # git commit
                     ]
@@ -498,7 +498,7 @@ class TestMultiCommitFunctionality(unittest.TestCase):
         ]
         
         # Apply the commit plan
-        self.cli.apply_commit_plan(commit_plan, 'main')
+        self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
         
         # Verify that 4 commits were actually created
         result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
@@ -534,7 +534,7 @@ class TestMultiCommitFunctionality(unittest.TestCase):
             }
         ]
         
-        self.cli.apply_commit_plan(commit_plan, 'main')
+        self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
         
         # Check that the first commit contains only auth.py
         result = subprocess.run(['git', 'show', '--name-only', 'HEAD~2'], 
@@ -576,7 +576,7 @@ class TestMultiCommitFunctionality(unittest.TestCase):
         ]
         
         with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            self.cli.apply_commit_plan(commit_plan, 'main')
+            self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
             output = mock_stdout.getvalue()
         
         # Should skip the nonexistent file commit
@@ -609,7 +609,7 @@ class TestMultiCommitFunctionality(unittest.TestCase):
         ]
         
         with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            self.cli.apply_commit_plan(commit_plan, 'main')
+            self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
             output = mock_stdout.getvalue()
         
         # Should skip the empty files commit
@@ -632,7 +632,7 @@ class TestMultiCommitFunctionality(unittest.TestCase):
             }
         ]
         
-        self.cli.apply_commit_plan(commit_plan, 'main')
+        self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
         
         # Should create 2 commits: planned commit + remaining changes
         result = subprocess.run(['git', 'log', '--oneline', 'main..HEAD'], 
@@ -655,7 +655,7 @@ class TestMultiCommitFunctionality(unittest.TestCase):
         ]
         
         with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            self.cli.apply_commit_plan(commit_plan, 'main')
+            self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
             output = mock_stdout.getvalue()
         
         # Should report creating 3 commits (2 planned + 1 remaining), not claim to create 3 from plan
@@ -808,7 +808,7 @@ class TestSafetyFeaturesExact(unittest.TestCase):
             with patch('time.time', return_value=1703123456.789):
                 with patch('builtins.input', return_value='y'):
                     try:
-                        self.cli.apply_commit_plan(commit_plan, 'main')
+                        self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
                     except:
                         pass  # We just want to check the branch name format
             
@@ -820,29 +820,32 @@ class TestSafetyFeaturesExact(unittest.TestCase):
             branch_call_str = str(branch_calls[0])
             self.assertIn('my-feature-branch-backup-1703123456', branch_call_str)
     
-    def test_soft_reset_exact_command(self):
-        """Test: Uses `git reset --soft` to preserve all changes"""
+    def test_hard_reset_exact_command(self):
+        """Test: Uses `git reset --hard` for clean working directory"""
         commit_plan = [{'message': 'test', 'files': [], 'rationale': 'test'}]
         
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = [
                 MagicMock(stdout='feature\n', returncode=0),  # current branch
                 MagicMock(returncode=0),  # create backup
-                MagicMock(returncode=0),  # git reset --soft
+                MagicMock(returncode=0),  # git reset --hard
                 MagicMock(returncode=0),  # git reset HEAD (unstage)
                 MagicMock(stdout='', returncode=0),  # git status --porcelain (check remaining)
             ]
             
             with patch('builtins.input', return_value='y'):
-                self.cli.apply_commit_plan(commit_plan, 'main')
+                # Create mock hunks and diff for the updated signature
+                mock_hunks = []
+                full_diff = "diff --git a/test.py b/test.py"
+                self.cli.apply_commit_plan(commit_plan, mock_hunks, full_diff, 'main')
             
             # Verify that git commands are called
             self.assertTrue(mock_run.called, "Git commands should be called")
             
-            # Look for git reset --soft in any of the calls
+            # Look for git reset --hard in any of the calls
             all_calls_str = str(mock_run.call_args_list)
             self.assertIn('reset', all_calls_str)
-            self.assertIn('--soft', all_calls_str)
+            self.assertIn('--hard', all_calls_str)
     
     def test_validation_clean_working_directory(self):
         """Test: Validates clean working directory"""
@@ -1731,7 +1734,7 @@ class TestAdvancedGitScenarios(unittest.TestCase):
             
             with patch('builtins.input', return_value='y'):
                 with self.assertRaises(SystemExit):
-                    self.cli.apply_commit_plan(commit_plan, 'main')
+                    self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
     
     def test_repository_corruption_detection(self):
         """Test detection of corrupted git repository"""
@@ -1764,7 +1767,7 @@ class TestConcurrencyAndRaceConditions(unittest.TestCase):
             
             with patch('builtins.input', return_value='y'):
                 with self.assertRaises(SystemExit):
-                    self.cli.apply_commit_plan(commit_plan, 'main')
+                    self.cli.apply_commit_plan(commit_plan, [], "diff --git a/test.py b/test.py", 'main')
     
     def test_config_file_modified_during_load(self):
         """Test handling of config file being modified during load"""
