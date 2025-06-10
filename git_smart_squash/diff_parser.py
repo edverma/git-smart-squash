@@ -3,7 +3,6 @@ Diff parser module for extracting individual hunks from git diff output.
 """
 
 import re
-import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Set, Dict
 

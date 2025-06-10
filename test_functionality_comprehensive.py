@@ -725,7 +725,7 @@ class TestAIProvidersExact(unittest.TestCase):
     def test_environment_variables_openai(self):
         """Test: Configure via environment variables: OPENAI_API_KEY"""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key-123'}):
-            config = Config(ai=AIConfig(provider='openai', model='gpt-4.1'))
+            config = Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig())
             provider = UnifiedAIProvider(config)
             
             # Test that provider configuration is correct
@@ -744,7 +744,7 @@ class TestAIProvidersExact(unittest.TestCase):
     def test_environment_variables_anthropic(self):
         """Test: Configure via environment variables: ANTHROPIC_API_KEY"""
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key-456'}):
-            config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+            config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig())
             provider = UnifiedAIProvider(config)
             
             # Test that provider configuration is correct
@@ -762,7 +762,7 @@ class TestAIProvidersExact(unittest.TestCase):
     
     def test_ollama_local_provider_integration(self):
         """Test: Local AI uses Ollama integration"""
-        config = Config(ai=AIConfig(provider='local', model='devstral'))
+        config = Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig())
         provider = UnifiedAIProvider(config)
         
         with patch('subprocess.run') as mock_run:
@@ -1040,7 +1040,7 @@ class TestCompleteWorkflowIntegration(unittest.TestCase):
         # Create CLI and run dry-run
         cli = GitSmartSquashCLI()
         from git_smart_squash.simple_config import Config, AIConfig
-        cli.config = Config(ai=AIConfig(provider='local', model='devstral'))
+        cli.config = Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig())
         
         # Simulate command line arguments for dry-run
         args = MagicMock()
@@ -1072,7 +1072,7 @@ class TestCompleteWorkflowIntegration(unittest.TestCase):
         
         cli = GitSmartSquashCLI()
         from git_smart_squash.simple_config import Config, AIConfig
-        cli.config = Config(ai=AIConfig(provider='local', model='devstral'))
+        cli.config = Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig())
         
         args = MagicMock()
         args.base = 'main'
@@ -1101,7 +1101,7 @@ class TestDynamicTokenManagement(unittest.TestCase):
     """Test dynamic token management for all AI providers"""
     
     def setUp(self):
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
     
     def test_token_estimation_accuracy(self):
         """Test token estimation works consistently"""
@@ -1176,7 +1176,7 @@ class TestErrorConditionsExact(unittest.TestCase):
     
     def test_no_changes_to_reorganize(self):
         """Test behavior when no changes exist between branches"""
-        self.cli.config = Config(ai=AIConfig())
+        self.cli.config = Config(ai=AIConfig(), hunks=HunkConfig())
         with patch.object(self.cli, 'get_full_diff', return_value=None):
             args = MagicMock()
             args.base = 'main'
@@ -1190,7 +1190,7 @@ class TestErrorConditionsExact(unittest.TestCase):
     
     def test_ai_analysis_failure(self):
         """Test behavior when AI analysis fails"""
-        self.cli.config = Config(ai=AIConfig())
+        self.cli.config = Config(ai=AIConfig(), hunks=HunkConfig())
         with patch.object(self.cli, 'get_full_diff', return_value='mock diff'):
             with patch.object(self.cli, 'analyze_with_ai', return_value=None):
                 args = MagicMock()
@@ -1205,7 +1205,7 @@ class TestErrorConditionsExact(unittest.TestCase):
     
     def test_user_cancellation(self):
         """Test behavior when user cancels the operation"""
-        self.cli.config = Config(ai=AIConfig())
+        self.cli.config = Config(ai=AIConfig(), hunks=HunkConfig())
         with patch.object(self.cli, 'get_full_diff', return_value='mock diff'):
             with patch.object(self.cli, 'analyze_with_ai', return_value=[{'message': 'test', 'files': [], 'rationale': 'test'}]):
                 with patch.object(self.cli, 'get_user_confirmation', return_value=False):
@@ -1224,7 +1224,7 @@ class TestStructuredOutputImplementation(unittest.TestCase):
     """Test the new structured output implementation across all providers"""
     
     def setUp(self):
-        self.config = Config(ai=AIConfig())
+        self.config = Config(ai=AIConfig(), hunks=HunkConfig())
         self.provider = UnifiedAIProvider(self.config)
     
     def test_commit_schema_structure(self):
@@ -1365,7 +1365,7 @@ class TestProviderSpecificFeatures(unittest.TestCase):
     """Test provider-specific features and error handling"""
     
     def setUp(self):
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
     
     def test_api_key_validation(self):
         """Test API key validation for cloud providers"""
@@ -1401,7 +1401,7 @@ class TestAdvancedIntegrationScenarios(unittest.TestCase):
     def test_command_line_argument_override_behavior(self):
         """Test that command line arguments properly override configuration"""
         # Create a config with different settings
-        config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'))
+        config = Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig())
         self.cli.config = config
         
         # Test provider override
@@ -1432,7 +1432,7 @@ class TestAdvancedIntegrationScenarios(unittest.TestCase):
         large_diff = '\n'.join(large_diff_lines)
         
         # Test token estimation
-        provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
         tokens = provider._estimate_tokens(large_diff)
         
         # Should be substantial
@@ -1450,11 +1450,11 @@ class TestPromptStructureValidation(unittest.TestCase):
     
     def setUp(self):
         self.cli = GitSmartSquashCLI()
-        self.cli.config = Config(ai=AIConfig())
+        self.cli.config = Config(ai=AIConfig(), hunks=HunkConfig())
     
     def test_prompt_includes_structure_example(self):
         """Test that prompt includes the expected JSON structure"""
-        self.cli.config = Config(ai=AIConfig())
+        self.cli.config = Config(ai=AIConfig(), hunks=HunkConfig())
         with patch.object(UnifiedAIProvider, 'generate', return_value='{"commits": []}') as mock_generate:
             self.cli.analyze_with_ai('mock diff')
             
@@ -1469,7 +1469,7 @@ class TestPromptStructureValidation(unittest.TestCase):
     
     def test_prompt_structure_consistency(self):
         """Test that prompt structure is consistent with schema"""
-        provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
         schema = provider.COMMIT_SCHEMA
         
         # Prompt should mention the same structure as schema
@@ -1514,7 +1514,7 @@ class TestSecurityAndValidation(unittest.TestCase):
     
     def setUp(self):
         self.cli = GitSmartSquashCLI()
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
     
     def test_malicious_ai_response_handling(self):
         """Test handling of potentially malicious AI responses"""
@@ -1579,7 +1579,7 @@ class TestNetworkResilience(unittest.TestCase):
     """Test network-related edge cases for cloud providers"""
     
     def setUp(self):
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig(provider='openai', model='gpt-4')))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(provider='openai', model='gpt-4'), hunks=HunkConfig()))
     
     def test_network_timeout_simulation(self):
         """Test handling of network timeouts"""
@@ -1607,7 +1607,7 @@ class TestPerformanceEdgeCases(unittest.TestCase):
     """Test performance-related edge cases"""
     
     def setUp(self):
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
     
     def test_extremely_long_commit_messages(self):
         """Test handling of extremely long commit messages"""
@@ -1641,7 +1641,7 @@ class TestSchemaValidationEdgeCases(unittest.TestCase):
     """Test comprehensive schema validation scenarios"""
     
     def setUp(self):
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
     
     def test_empty_commits_array(self):
         """Test handling of empty commits array"""
@@ -1785,7 +1785,7 @@ class TestMemoryAndResourceManagement(unittest.TestCase):
     """Test memory usage and resource management"""
     
     def setUp(self):
-        self.provider = UnifiedAIProvider(Config(ai=AIConfig()))
+        self.provider = UnifiedAIProvider(Config(ai=AIConfig(), hunks=HunkConfig()))
     
     def test_large_response_handling(self):
         """Test handling of very large AI responses"""

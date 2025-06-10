@@ -3,9 +3,7 @@
 import os
 import subprocess
 import json
-import re
 import google.generativeai as genai
-from typing import Optional
 
 
 class UnifiedAIProvider:
@@ -75,10 +73,28 @@ class UnifiedAIProvider:
         )
     
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count using conservative heuristics."""
+        """Estimate token count using tiktoken for all providers."""
+        try:
+            import tiktoken
+            
+            # Use tiktoken for all providers - it provides much more accurate 
+            # token estimation than character-based heuristics
+            # cl100k_base is used by GPT-4, GPT-3.5-turbo and is a good general tokenizer
+            encoding = tiktoken.get_encoding('cl100k_base')
+            token_count = len(encoding.encode(text))
+            # Ensure minimum of 1 token for consistency with fallback behavior
+            return max(1, token_count)
+                
+        except ImportError:
+            # Fall back to heuristic if tiktoken not available
+            print("Warning: tiktoken not available, using fallback token estimation")
+        except Exception as e:
+            # Fall back to heuristic on any tiktoken error
+            print(f"Warning: tiktoken error ({e}), using fallback token estimation")
+        
+        # Fallback heuristic only when tiktoken fails
         # More conservative estimation for code/diffs: 1 token ≈ 3 characters
         # This overestimates to ensure we don't truncate prompts
-        # Code and technical content typically has higher token density
         return max(1, int(len(text) // 3))
     
     def _calculate_dynamic_params(self, prompt: str) -> dict:

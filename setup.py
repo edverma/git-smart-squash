@@ -21,9 +21,8 @@ requirements = [
     "rich>=13.0.0", 
     "openai>=1.0.0",
     "anthropic>=0.3.0",
-    "google-generativeai>=0.8.5",
-    "requests>=2.28.0",
     "tiktoken>=0.5.0",
+    "google-generativeai>=0.8.5",
 ]
 
 
@@ -75,14 +74,10 @@ setup(
             "flake8>=5.0.0",
             "mypy>=1.0.0",
         ],
-        "local": [
-            "requests>=2.28.0",  # For llama.cpp server communication
-        ],
     },
     entry_points={
         "console_scripts": [
             "git-smart-squash=git_smart_squash.cli:main",
-            "gss=git_smart_squash.zero_friction_cli_enhanced:main",
         ],
     },
     cmdclass={

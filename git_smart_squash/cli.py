@@ -4,7 +4,6 @@ import argparse
 import sys
 import subprocess
 import json
-import os
 from typing import List, Dict, Any, Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -13,7 +12,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .simple_config import ConfigManager
 from .ai.providers.simple_unified import UnifiedAIProvider
 from .diff_parser import parse_diff, Hunk
-from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area, preview_hunk_application
+from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area
 
 
 class GitSmartSquashCLI:
