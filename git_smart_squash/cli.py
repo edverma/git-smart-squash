@@ -406,6 +406,12 @@ class GitSmartSquashCLI:
                         except Exception as e:
                             self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
                     
+                    # Ensure working directory matches the final commit state
+                    # This fixes the bug where working directory stays at base branch  
+                    # while HEAD moves to final commit, causing false unstaged changes
+                    if commits_created > 0:
+                        subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+                    
                     self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
                     self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")
                 
