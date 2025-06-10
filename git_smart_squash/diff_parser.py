@@ -761,6 +761,9 @@ def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, 
     """
     Calculate line number adjustments for interdependent hunks in the same file.
     
+    IMPORTANT: This function should only be called when hunks actually overlap.
+    For non-overlapping hunks, the original line numbers are correct.
+    
     Args:
         hunks_for_file: List of hunks affecting the same file
         
@@ -771,21 +774,32 @@ def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, 
     sorted_hunks = sorted(hunks_for_file, key=lambda h: h.start_line)
     
     adjustments = {}
-    cumulative_shift = 0
     
-    for hunk in sorted_hunks:
-        # Calculate this hunk's effect on line numbers
-        additions, deletions = _count_hunk_changes(hunk)
-        line_shift = additions - deletions
-        
-        # Adjust this hunk's start position based on previous changes
+    # For overlapping hunks, we need to be much more conservative
+    # The key insight: only adjust line numbers if hunks actually interfere
+    for i, hunk in enumerate(sorted_hunks):
+        # Start with original line numbers
         adjusted_old_start = hunk.start_line
+        adjusted_new_start = hunk.start_line
+        
+        # Only apply cumulative shifts for hunks that come after overlapping changes
+        cumulative_shift = 0
+        for j in range(i):
+            prev_hunk = sorted_hunks[j]
+            
+            # Only count shift from hunks that actually affect this hunk's position
+            if prev_hunk.end_line >= hunk.start_line - 3:  # Within context range
+                additions, deletions = _count_hunk_changes(prev_hunk)
+                cumulative_shift += additions - deletions
+        
+        # Apply conservative adjustment
         adjusted_new_start = hunk.start_line + cumulative_shift
         
-        adjustments[hunk.id] = (adjusted_old_start, adjusted_new_start)
+        # Ensure we don't go below line 1
+        adjusted_old_start = max(1, adjusted_old_start)
+        adjusted_new_start = max(1, adjusted_new_start)
         
-        # Update cumulative shift for subsequent hunks
-        cumulative_shift += line_shift
+        adjustments[hunk.id] = (adjusted_old_start, adjusted_new_start)
     
     return adjustments
 
@@ -808,7 +822,11 @@ def _count_hunk_changes(hunk: Hunk) -> Tuple[int, int]:
 
 def _create_valid_git_patch(hunks: List[Hunk], base_diff: str) -> str:
     """
-    Create a valid git patch with corrected line numbers for interdependent hunks.
+    Create a valid git patch using original hunk content when possible.
+    
+    The key insight: hunks parsed from 'git diff main...HEAD' already have correct
+    line numbers for application to the current state (after reset to main).
+    We only need to recalculate line numbers when hunks actually overlap.
     
     Args:
         hunks: List of hunks to include
@@ -845,41 +863,86 @@ def _create_valid_git_patch(hunks: List[Hunk], base_diff: str) -> str:
                 f"+++ b/{file_path}"
             ])
         
-        # Calculate line number adjustments for this file
-        adjustments = _calculate_line_number_adjustments(file_hunks)
+        # Sort hunks by start line
+        sorted_hunks = sorted(file_hunks, key=lambda h: h.start_line)
         
-        # Apply hunks with corrected line numbers
-        for hunk in sorted(file_hunks, key=lambda h: h.start_line):
-            adjusted_old_start, adjusted_new_start = adjustments[hunk.id]
+        # Check if hunks actually overlap and need line number recalculation
+        needs_recalculation = _hunks_need_line_recalculation(sorted_hunks)
+        
+        if needs_recalculation:
+            # Only recalculate line numbers for truly overlapping hunks
+            adjustments = _calculate_line_number_adjustments(sorted_hunks)
             
-            # Reconstruct hunk with proper line numbers
-            hunk_lines = hunk.content.split('\n')
-            
-            if hunk_lines and hunk_lines[0].startswith('@@'):
-                # Count content for proper header
-                additions, deletions = _count_hunk_changes(hunk)
-                context = sum(1 for line in hunk_lines[1:] if line.startswith(' '))
+            for hunk in sorted_hunks:
+                adjusted_old_start, adjusted_new_start = adjustments[hunk.id]
                 
-                old_count = deletions + context
-                new_count = additions + context
+                # Reconstruct hunk with adjusted line numbers
+                hunk_lines = hunk.content.split('\n')
                 
-                # Create corrected header
-                corrected_header = f"@@ -{adjusted_old_start},{old_count} +{adjusted_new_start},{new_count} @@"
+                if hunk_lines and hunk_lines[0].startswith('@@'):
+                    # Count content for proper header
+                    additions, deletions = _count_hunk_changes(hunk)
+                    context = sum(1 for line in hunk_lines[1:] if line.startswith(' '))
+                    
+                    old_count = deletions + context
+                    new_count = additions + context
+                    
+                    # Create corrected header
+                    corrected_header = f"@@ -{adjusted_old_start},{old_count} +{adjusted_new_start},{new_count} @@"
+                    
+                    # Add context from original if present
+                    if '@@' in hunk_lines[0]:
+                        parts = hunk_lines[0].split('@@')
+                        if len(parts) >= 3:
+                            corrected_header += f" {parts[2]}"
+                    
+                    hunk_lines[0] = corrected_header
                 
-                # Add context from original if present
-                if '@@' in hunk_lines[0]:
-                    parts = hunk_lines[0].split('@@')
-                    if len(parts) >= 3:
-                        corrected_header += f" {parts[2]}"
+                # Add corrected hunk to patch
+                for line in hunk_lines:
+                    if line:
+                        patch_parts.append(line)
+        else:
+            # Use original hunk content without modification
+            # This preserves the correct line numbers from the original diff
+            for hunk in sorted_hunks:
+                hunk_lines = hunk.content.split('\n')
                 
-                hunk_lines[0] = corrected_header
-            
-            # Add corrected hunk to patch
-            for line in hunk_lines:
-                if line:
-                    patch_parts.append(line)
+                # Add original hunk content directly
+                for line in hunk_lines:
+                    if line:
+                        patch_parts.append(line)
     
     return '\n'.join(patch_parts) + '\n' if patch_parts else ""
+
+
+def _hunks_need_line_recalculation(hunks: List[Hunk]) -> bool:
+    """
+    Determine if hunks in the same file need line number recalculation.
+    
+    We only need to recalculate line numbers when hunks actually overlap
+    or are close enough to interfere with each other's line numbers.
+    
+    Args:
+        hunks: List of hunks in the same file, sorted by start_line
+        
+    Returns:
+        True if hunks need line number recalculation, False if original can be used
+    """
+    if len(hunks) <= 1:
+        return False
+    
+    # Check for overlapping or closely adjacent hunks
+    for i in range(len(hunks) - 1):
+        current_hunk = hunks[i]
+        next_hunk = hunks[i + 1]
+        
+        # Check if hunks overlap or are very close (within 3 lines)
+        # Close hunks might interfere with each other's context lines
+        if current_hunk.end_line + 3 >= next_hunk.start_line:
+            return True
+    
+    return False
 
 
 def _extract_original_headers(base_diff: str) -> Dict[str, List[str]]:
