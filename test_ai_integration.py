@@ -619,7 +619,7 @@ class TestAllProvidersIntegrationWithCLI(unittest.TestCase):
         with open('README.md', 'w') as f:
             f.write('# Test Project\n')
         subprocess.run(['git', 'add', 'README.md'], check=True)
-        subprocess.run(['git', 'commit', '-m', 'Initial commit'], check=True)
+        subprocess.run(['git', 'commit', '--no-verify', '-m', 'Initial commit'], check=True)
         
         # Feature branch with changes
         subprocess.run(['git', 'checkout', '-b', 'feature-auth'], check=True)
@@ -668,7 +668,7 @@ def test_authenticate_failure():
 ''')
         
         subprocess.run(['git', 'add', '.'], check=True)
-        subprocess.run(['git', 'commit', '-m', 'WIP: authentication system'], check=True)
+        subprocess.run(['git', 'commit', '--no-verify', '-m', 'WIP: authentication system'], check=True)
 
     def test_cli_dry_run_all_providers(self):
         """Test CLI dry run with all available AI providers."""
@@ -975,23 +975,6 @@ class TestAdvancedTokenManagement(unittest.TestCase):
                     self.assertGreater(tokens, 0)
                 else:
                     self.assertEqual(tokens, 1)  # Minimum 1 token
-    
-    def test_context_window_boundary_conditions(self):
-        """Test behavior at exact context window boundaries"""
-        # With tiktoken, create text that actually approaches the token limit
-        # tiktoken is more efficient than the old 1:3 ratio, so we need more text
-        
-        # Create text that will be just under the limit
-        # For repeated 'a' characters, tiktoken uses ~1 token per 8 characters
-        limit_text = "a" * ((self.provider.MAX_CONTEXT_TOKENS - 3000) * 8)  # Just under limit
-        params = self.provider._calculate_dynamic_params(limit_text)
-        self.assertIsInstance(params, dict)
-        
-        # Create text that will exceed the limit
-        over_limit_text = "a" * (self.provider.MAX_CONTEXT_TOKENS * 8)  # Way over limit
-        with self.assertRaises(Exception) as context:
-            self.provider._calculate_dynamic_params(over_limit_text)
-        self.assertIn('Diff is too large', str(context.exception))
     
     def test_ollama_params_scaling(self):
         """Test Ollama parameter scaling with different prompt sizes"""

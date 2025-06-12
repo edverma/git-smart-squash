@@ -38,7 +38,7 @@ if __name__ == "__main__":
 ''')
     
     run_command('git add test.py', cwd=test_dir)
-    run_command('git commit -m "Initial commit"', cwd=test_dir)
+    run_command('git commit --no-verify -m "Initial commit"', cwd=test_dir)
     
     # Make some changes that would benefit from squashing
     # Change 1: Add function
@@ -57,7 +57,7 @@ if __name__ == "__main__":
 ''')
     
     run_command('git add test.py', cwd=test_dir)
-    run_command('git commit -m "Add goodbye function"', cwd=test_dir)
+    run_command('git commit --no-verify -m "Add goodbye function"', cwd=test_dir)
     
     # Change 2: Update main function
     with open(test_file, 'w') as f:
@@ -76,7 +76,7 @@ if __name__ == "__main__":
 ''')
     
     run_command('git add test.py', cwd=test_dir)
-    run_command('git commit -m "Update main function"', cwd=test_dir)
+    run_command('git commit --no-verify -m "Update main function"', cwd=test_dir)
     
     # Change 3: Add documentation
     with open(test_file, 'w') as f:
@@ -102,7 +102,7 @@ if __name__ == "__main__":
 ''')
     
     run_command('git add test.py', cwd=test_dir)
-    run_command('git commit -m "Add documentation"', cwd=test_dir)
+    run_command('git commit --no-verify -m "Add documentation"', cwd=test_dir)
     
     return test_dir
 

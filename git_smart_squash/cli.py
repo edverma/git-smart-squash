@@ -375,6 +375,10 @@ class GitSmartSquashCLI:
                                         commits_created += 1
                                         all_applied_hunk_ids.update(hunk_ids)
                                         self.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
+                                        
+                                        # Update working directory to match the commit
+                                        # This ensures files reflect the committed state
+                                        subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                                     else:
                                         self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
                                 else:
@@ -403,14 +407,14 @@ class GitSmartSquashCLI:
                                     ], check=True)
                                     commits_created += 1
                                     self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
+                                    
+                                    # Update working directory to match the commit
+                                    subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                         except Exception as e:
                             self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
                     
-                    # Ensure working directory matches the final commit state
-                    # This fixes the bug where working directory stays at base branch  
-                    # while HEAD moves to final commit, causing false unstaged changes
-                    if commits_created > 0:
-                        subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+                    # Working directory is now kept in sync after each commit,
+                    # so no need for a final reset
                     
                     self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
                     self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")
