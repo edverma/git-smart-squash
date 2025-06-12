@@ -627,16 +627,34 @@ def _verify_working_dir_integrity(affected_files: Set[str], patch_content: str) 
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                         content = f.read()
                     
-                    # Check for common corruption patterns
+                    # ENHANCED: Check for common corruption patterns with better heuristics
                     if file_path.endswith(('.js', '.ts', '.jsx', '.tsx', '.svelte', '.vue')):
-                        # Check for missing closing braces in JavaScript-like files
-                        if content.strip() and not content.rstrip().endswith(('}', ';', ')', ']', '>')):
-                            # This might be a truncation issue
+                        # More sophisticated check for missing closing braces in JavaScript-like files
+                        if content.strip():
                             lines = content.splitlines()
                             if lines:
                                 last_line = lines[-1].strip()
-                                if last_line and not last_line.endswith(('}', ';', ')', ']', '>')):
-                                    print(f"Warning: File {file_path} may be missing closing syntax")
+                                
+                                # Count braces to detect imbalance
+                                open_braces = content.count('{')
+                                close_braces = content.count('}')
+                                
+                                # Check if file ends abruptly
+                                ends_properly = last_line.endswith(('}', ';', ')', ']', '>'))
+                                
+                                # CRITICAL FIX: More robust detection
+                                if open_braces > close_braces:
+                                    print(f"Warning: File {file_path} has unmatched opening braces ({open_braces} open, {close_braces} close)")
+                                    issues_found += 1
+                                elif not ends_properly and len(lines) > 10:
+                                    # Only flag files that are substantial and don't end properly
+                                    # Check if the last line looks incomplete
+                                    if any(keyword in last_line.lower() for keyword in ['function', 'if', 'for', 'while', 'export', 'import', 'const', 'let', 'var']):
+                                        print(f"Warning: File {file_path} may end abruptly - last line: '{last_line}'")
+                                        issues_found += 1
+                                elif not content.endswith('\n') and '\\' not in content[-10:]:
+                                    # File doesn't end with newline and no "No newline" marker nearby
+                                    print(f"Warning: File {file_path} missing trailing newline without proper marker")
                                     issues_found += 1
                     
                     # Check for completely empty files that shouldn't be empty

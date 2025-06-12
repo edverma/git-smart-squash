@@ -83,6 +83,12 @@ class GitSmartSquashCLI:
             help='Path to configuration file'
         )
         
+        parser.add_argument(
+            '--yes', '-y',
+            action='store_true',
+            help='Automatically accept the generated commit plan without confirmation'
+        )
+        
         return parser
     
     def run_smart_squash(self, args):
@@ -133,7 +139,10 @@ class GitSmartSquashCLI:
             if args.dry_run:
                 self.console.print("\n[green]Dry run complete. Use without --dry-run to apply changes.[/green]")
             else:
-                if self.get_user_confirmation():
+                # Auto-accept if --yes flag is provided, otherwise ask for confirmation
+                if args.yes or self.get_user_confirmation():
+                    if args.yes:
+                        self.console.print("\n[green]Auto-accepting commit plan (--yes flag provided)[/green]")
                     self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
                 else:
                     self.console.print("Operation cancelled.")
