@@ -5,7 +5,7 @@ Hunk applicator module for applying specific hunks to the git staging area.
 import os
 import subprocess
 import tempfile
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set
 from .diff_parser import Hunk, validate_hunk_combination, create_dependency_groups
 
 
@@ -231,9 +231,83 @@ def _apply_hunks_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
 
 
 
+def _extract_files_from_patch(patch_content: str) -> Set[str]:
+    """
+    Extract the list of files affected by a patch.
+    
+    Args:
+        patch_content: The patch content
+        
+    Returns:
+        Set of file paths affected by the patch
+    """
+    files = set()
+    lines = patch_content.split('\n')
+    
+    for line in lines:
+        if line.startswith('diff --git'):
+            # Extract file path from diff header
+            # Format: diff --git a/path/to/file b/path/to/file
+            parts = line.split()
+            if len(parts) >= 4:
+                # Remove 'b/' prefix
+                file_path = parts[3][2:] if parts[3].startswith('b/') else parts[3]
+                files.add(file_path)
+        elif line.startswith('+++'):
+            # Alternative: extract from +++ header
+            # Format: +++ b/path/to/file
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] != '/dev/null':
+                file_path = parts[1][2:] if parts[1].startswith('b/') else parts[1]
+                files.add(file_path)
+    
+    return files
+
+
+def _sync_files_from_staging(file_paths: Set[str]) -> bool:
+    """
+    Sync specific files from staging area to working directory.
+    
+    Args:
+        file_paths: Set of file paths to sync
+        
+    Returns:
+        True if all files synced successfully
+    """
+    if not file_paths:
+        # If no files specified, sync all
+        try:
+            subprocess.run(['git', 'checkout-index', '-f', '-a'], check=True, capture_output=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+    
+    # Sync each file individually
+    all_success = True
+    for file_path in file_paths:
+        try:
+            # Use git checkout-index to sync specific file
+            result = subprocess.run(
+                ['git', 'checkout-index', '-f', '--', file_path],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            if result.returncode != 0:
+                print(f"Failed to sync {file_path}: {result.stderr}")
+                all_success = False
+                
+        except Exception as e:
+            print(f"Error syncing {file_path}: {e}")
+            all_success = False
+    
+    return all_success
+
+
 def _apply_patch_with_git(patch_content: str) -> bool:
     """
-    Apply a patch using git's native mechanism.
+    Apply a patch using git's native mechanism with improved file-specific sync.
 
     Args:
         patch_content: The patch content to apply
@@ -242,6 +316,9 @@ def _apply_patch_with_git(patch_content: str) -> bool:
         True if successfully applied, False otherwise
     """
     try:
+        # Extract affected files from patch content
+        affected_files = _extract_files_from_patch(patch_content)
+        
         # Save current staging state for rollback
         staging_state = _save_staging_state()
 
@@ -262,10 +339,10 @@ def _apply_patch_with_git(patch_content: str) -> bool:
             )
 
             if result.returncode == 0:
-                print("✓ Patch applied successfully via git apply")
+                print("✓ Patch applied successfully via git apply --index")
                 return True
             else:
-                print(f"Git apply failed: {result.stderr}")
+                print(f"Git apply --index failed: {result.stderr}")
                 # If --index fails, fallback to --cached and then sync working directory
                 result_cached = subprocess.run(
                     ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
@@ -276,13 +353,16 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                 
                 if result_cached.returncode == 0:
                     print("✓ Patch applied to staging area, syncing working directory...")
-                    # Force working directory to match staging area
-                    try:
-                        subprocess.run(['git', 'checkout-index', '-f', '-a'], check=True, capture_output=True)
-                        print("✓ Working directory synchronized")
+                    
+                    # Sync only the affected files from staging to working directory
+                    # This is more precise than syncing all files with checkout-index -a
+                    sync_success = _sync_files_from_staging(affected_files)
+                    
+                    if sync_success:
+                        print("✓ Working directory synchronized for affected files")
                         return True
-                    except subprocess.CalledProcessError as sync_error:
-                        print(f"Failed to sync working directory: {sync_error}")
+                    else:
+                        print("Failed to sync working directory")
                         # Rollback staging state
                         _restore_staging_state(staging_state)
                         return False
