@@ -281,7 +281,15 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
                 for line in hunk_lines:
                     patch_parts.append(line)
     
-    return '\n'.join(patch_parts) + '\n' if patch_parts else ""
+    # Check if the patch contains "\ No newline at end of file" marker
+    # If it does, don't add a trailing newline to preserve the file's original state
+    patch_content = '\n'.join(patch_parts) if patch_parts else ""
+    
+    # Only add trailing newline if the patch doesn't indicate "no newline at end of file"
+    if patch_content and not any('\\' in line and 'No newline' in line for line in patch_parts):
+        patch_content += '\n'
+    
+    return patch_content
 
 
 def validate_hunk_combination(hunks: List[Hunk]) -> Tuple[bool, str]:
@@ -932,7 +940,15 @@ def _create_valid_git_patch(hunks: List[Hunk], base_diff: str) -> str:
                 for line in hunk_lines:
                     patch_parts.append(line)
     
-    return '\n'.join(patch_parts) + '\n' if patch_parts else ""
+    # Check if the patch contains "\ No newline at end of file" marker
+    # If it does, don't add a trailing newline to preserve the file's original state
+    patch_content = '\n'.join(patch_parts) if patch_parts else ""
+    
+    # Only add trailing newline if the patch doesn't indicate "no newline at end of file"
+    if patch_content and not any('\\' in line and 'No newline' in line for line in patch_parts):
+        patch_content += '\n'
+    
+    return patch_content
 
 
 def _hunks_need_line_recalculation(hunks: List[Hunk]) -> bool:
