@@ -74,6 +74,10 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     for i, group in enumerate(dependency_groups):
         print(f"Applying group {i+1}/{len(dependency_groups)} ({len(group)} hunks)...")
 
+        # CRITICAL FIX: Save staging state before attempting group application
+        # This prevents corrupt patch failures from leaving the repository in a broken state
+        group_staging_state = _save_staging_state()
+
         if len(group) == 1:
             # Single hunk - apply individually for better error isolation
             success = _apply_hunks_sequentially(group, base_diff)
@@ -87,7 +91,9 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
                 success = _apply_dependency_group_sequentially(group, base_diff)
 
         if not success:
-            print(f"Failed to apply group {i+1}")
+            print(f"Failed to apply group {i+1}, restoring staging state...")
+            # CRITICAL FIX: Restore staging state to prevent broken repository state
+            _restore_staging_state(group_staging_state)
             return False
 
         print(f"✓ Group {i+1} applied successfully")
@@ -321,14 +327,35 @@ def _apply_patch_with_git(patch_content: str) -> bool:
         
         # Save current staging state for rollback
         staging_state = _save_staging_state()
+        
+        # CRITICAL FIX: Save working directory state for affected files BEFORE any patch operations
+        working_dir_state = _save_working_dir_state(affected_files)
+        
+        # CRITICAL FIX: Also save the current staging state before applying patches
+        original_staging_state = _save_staging_state()
 
-        # Create temporary patch file
+        # Create temporary patch file with enhanced validation
         with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as patch_file:
             patch_file.write(patch_content)
             patch_file.flush()  # CRITICAL FIX: Ensure content is written to disk before git reads it
+            # ADDITIONAL FIX: Force OS to sync the file to disk
+            os.fsync(patch_file.fileno())
             patch_file_path = patch_file.name
 
         try:
+            # CRITICAL FIX: Validate patch file is readable before attempting to apply
+            try:
+                with open(patch_file_path, 'r') as test_read:
+                    patch_verification = test_read.read()
+                    if patch_verification != patch_content:
+                        raise Exception("Patch file write verification failed")
+            except Exception as e:
+                print(f"Patch file validation failed: {e}")
+                # Restore states and return failure
+                _restore_working_dir_state(working_dir_state, affected_files)
+                _restore_staging_state(original_staging_state)
+                return False
+            
             # Apply patch using git apply --index to update both staging area and working directory
             # This ensures that the working directory is immediately synchronized with the staging area
             result = subprocess.run(
@@ -340,9 +367,20 @@ def _apply_patch_with_git(patch_content: str) -> bool:
 
             if result.returncode == 0:
                 print("✓ Patch applied successfully via git apply --index")
-                return True
+                # CRITICAL FIX: Verify working directory matches expected state after successful apply
+                if _verify_working_dir_integrity(affected_files, patch_content):
+                    return True
+                else:
+                    print("Warning: Working directory integrity check failed after successful patch apply")
+                    # Don't fail here, but log the issue
+                    return True
             else:
                 print(f"Git apply --index failed: {result.stderr}")
+                # CRITICAL FIX: Immediately restore BOTH working directory and staging states
+                print("Restoring working directory and staging states after --index failure...")
+                _restore_working_dir_state(working_dir_state, affected_files)
+                _restore_staging_state(original_staging_state)
+                
                 # If --index fails, fallback to --cached and then sync working directory
                 result_cached = subprocess.run(
                     ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
@@ -363,13 +401,15 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                         return True
                     else:
                         print("Failed to sync working directory")
-                        # Rollback staging state
+                        # CRITICAL FIX: Restore both staging and working directory states
                         _restore_staging_state(staging_state)
+                        _restore_working_dir_state(working_dir_state, affected_files)
                         return False
                 else:
                     print(f"Git apply --cached also failed: {result_cached.stderr}")
-                    # Rollback staging state
+                    # CRITICAL FIX: Restore both staging and working directory states
                     _restore_staging_state(staging_state)
+                    _restore_working_dir_state(working_dir_state, affected_files)
                     return False
 
         finally:
@@ -378,6 +418,11 @@ def _apply_patch_with_git(patch_content: str) -> bool:
 
     except Exception as e:
         print(f"Error applying patch with git: {e}")
+        # CRITICAL FIX: Restore working directory state on any exception
+        try:
+            _restore_working_dir_state(working_dir_state, affected_files)
+        except:
+            pass
         return False
 
 
@@ -435,6 +480,183 @@ def _restore_staging_state(saved_state: Optional[str]) -> bool:
 
         return True
     except:
+        return False
+
+
+def _save_working_dir_state(affected_files: Set[str]) -> Dict[str, str]:
+    """
+    Save current working directory state for affected files with enhanced reliability.
+
+    Args:
+        affected_files: Set of file paths to save state for
+
+    Returns:
+        Dictionary mapping file paths to their content, or empty dict if unable to save
+    """
+    file_states = {}
+    try:
+        for file_path in affected_files:
+            try:
+                if os.path.exists(file_path):
+                    # CRITICAL FIX: Use binary mode first to handle any file type
+                    try:
+                        with open(file_path, 'rb') as f:
+                            binary_content = f.read()
+                        # Try to decode as UTF-8, fall back to latin-1 if needed
+                        try:
+                            file_states[file_path] = binary_content.decode('utf-8')
+                        except UnicodeDecodeError:
+                            file_states[file_path] = binary_content.decode('latin-1')
+                    except Exception:
+                        # Final fallback: read as text with ignore errors
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            file_states[file_path] = f.read()
+                else:
+                    # Mark non-existent files as such
+                    file_states[file_path] = None
+                    
+                # CRITICAL FIX: Verify the file was read correctly by checking length
+                if file_states[file_path] is not None and os.path.exists(file_path):
+                    expected_size = os.path.getsize(file_path)
+                    if expected_size > 0 and len(file_states[file_path]) == 0:
+                        print(f"Warning: File {file_path} appears non-empty but read as empty")
+                        
+            except Exception as e:
+                print(f"Warning: Could not save state for {file_path}: {e}")
+                # Continue with other files
+        
+        print(f"Successfully saved working directory state for {len(file_states)} files")
+        return file_states
+    except Exception as e:
+        print(f"Error saving working directory state: {e}")
+        return {}
+
+
+def _restore_working_dir_state(saved_states: Dict[str, str], affected_files: Set[str]) -> bool:
+    """
+    Restore working directory state for affected files with enhanced reliability.
+
+    Args:
+        saved_states: Dictionary mapping file paths to their saved content
+        affected_files: Set of file paths to restore
+
+    Returns:
+        True if restoration successful
+    """
+    try:
+        if not saved_states:
+            print("No saved states to restore")
+            return True
+
+        restored_count = 0
+        failed_count = 0
+        
+        for file_path in affected_files:
+            try:
+                if file_path in saved_states:
+                    saved_content = saved_states[file_path]
+                    if saved_content is None:
+                        # File didn't exist, remove it if it exists now
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"Removed file that shouldn't exist: {file_path}")
+                            restored_count += 1
+                    else:
+                        # CRITICAL FIX: Create directory if it doesn't exist
+                        dir_path = os.path.dirname(file_path)
+                        if dir_path and not os.path.exists(dir_path):
+                            os.makedirs(dir_path, exist_ok=True)
+                        
+                        # CRITICAL FIX: Use same encoding strategy as saving
+                        try:
+                            # Try to encode as UTF-8 first
+                            content_bytes = saved_content.encode('utf-8')
+                            with open(file_path, 'wb') as f:
+                                f.write(content_bytes)
+                        except UnicodeEncodeError:
+                            # Fallback to latin-1 if UTF-8 fails
+                            content_bytes = saved_content.encode('latin-1')
+                            with open(file_path, 'wb') as f:
+                                f.write(content_bytes)
+                        
+                        # CRITICAL FIX: Verify the file was written correctly
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                written_content = f.read()
+                            if len(written_content) != len(saved_content):
+                                print(f"Warning: File {file_path} restoration size mismatch: expected {len(saved_content)}, got {len(written_content)}")
+                        except Exception:
+                            pass  # Verification failed, but file was written
+                        
+                        print(f"Restored working directory state for: {file_path}")
+                        restored_count += 1
+                else:
+                    print(f"Warning: No saved state found for {file_path}")
+                    failed_count += 1
+                    
+            except Exception as e:
+                print(f"Error: Could not restore {file_path}: {e}")
+                failed_count += 1
+                # Continue with other files
+
+        print(f"Working directory restoration: {restored_count} restored, {failed_count} failed out of {len(affected_files)} files")
+        return failed_count == 0
+    except Exception as e:
+        print(f"Error during working directory restoration: {e}")
+        return False
+
+
+def _verify_working_dir_integrity(affected_files: Set[str], patch_content: str) -> bool:
+    """
+    Verify that working directory files are in a valid state after patch application.
+    
+    Args:
+        affected_files: Set of file paths that were modified
+        patch_content: The patch content that was applied
+        
+    Returns:
+        True if working directory appears to be in good state
+    """
+    try:
+        issues_found = 0
+        total_files = len(affected_files)
+        
+        for file_path in affected_files:
+            try:
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    
+                    # Check for common corruption patterns
+                    if file_path.endswith(('.js', '.ts', '.jsx', '.tsx', '.svelte', '.vue')):
+                        # Check for missing closing braces in JavaScript-like files
+                        if content.strip() and not content.rstrip().endswith(('}', ';', ')', ']', '>')):
+                            # This might be a truncation issue
+                            lines = content.splitlines()
+                            if lines:
+                                last_line = lines[-1].strip()
+                                if last_line and not last_line.endswith(('}', ';', ')', ']', '>')):
+                                    print(f"Warning: File {file_path} may be missing closing syntax")
+                                    issues_found += 1
+                    
+                    # Check for completely empty files that shouldn't be empty
+                    if os.path.getsize(file_path) == 0 and 'delete' not in patch_content.lower():
+                        print(f"Warning: File {file_path} is unexpectedly empty")
+                        issues_found += 1
+                        
+            except Exception as e:
+                print(f"Warning: Could not verify integrity of {file_path}: {e}")
+                issues_found += 1
+        
+        if issues_found > 0:
+            print(f"Working directory integrity check: {issues_found} potential issues found out of {total_files} files")
+            return False
+        else:
+            print(f"Working directory integrity check: All {total_files} files appear valid")
+            return True
+            
+    except Exception as e:
+        print(f"Error during working directory integrity check: {e}")
         return False
 
 

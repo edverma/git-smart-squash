@@ -769,8 +769,7 @@ def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, 
     """
     Calculate line number adjustments for interdependent hunks in the same file.
     
-    IMPORTANT: This function should only be called when hunks actually overlap.
-    For non-overlapping hunks, the original line numbers are correct.
+    ENHANCED: This function now uses more conservative logic to prevent patch corruption.
     
     Args:
         hunks_for_file: List of hunks affecting the same file
@@ -783,31 +782,67 @@ def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, 
     
     adjustments = {}
     
-    # For overlapping hunks, we need to be much more conservative
-    # The key insight: only adjust line numbers if hunks actually interfere
+    # CRITICAL FIX: Check if hunks actually need adjustment
+    # If hunks don't truly overlap, use original line numbers
+    needs_adjustment = False
+    for i in range(len(sorted_hunks) - 1):
+        current_hunk = sorted_hunks[i]
+        next_hunk = sorted_hunks[i + 1]
+        
+        # Check for true overlap (not just proximity)
+        if current_hunk.end_line >= next_hunk.start_line:
+            needs_adjustment = True
+            break
+        
+        # Check if current hunk changes file size significantly
+        additions, deletions = _count_hunk_changes(current_hunk)
+        if abs(additions - deletions) > 0:
+            # Check if the change would affect subsequent hunks
+            gap = next_hunk.start_line - current_hunk.end_line
+            if gap <= 5:  # Small gap, likely needs adjustment
+                needs_adjustment = True
+                break
+    
+    if not needs_adjustment:
+        # No adjustment needed, return original line numbers
+        for hunk in sorted_hunks:
+            adjustments[hunk.id] = (hunk.start_line, hunk.start_line)
+        return adjustments
+    
+    # Apply conservative adjustments only when necessary
     for i, hunk in enumerate(sorted_hunks):
-        # Start with original line numbers - both old and new should start from the same base
-        # since we're applying to the current state after reset to main
+        # Start with original line numbers
         adjusted_old_start = hunk.start_line
         adjusted_new_start = hunk.start_line
         
-        # Apply cumulative shifts from all previous hunks that change file size
+        # Apply cumulative shifts from previous hunks more carefully
         cumulative_shift = 0
         for j in range(i):
             prev_hunk = sorted_hunks[j]
             
-            # All previous hunks that change file size affect this hunk's line numbers
+            # Only apply shifts if previous hunk actually affects this one
             additions, deletions = _count_hunk_changes(prev_hunk)
             hunk_net_change = additions - deletions
             
-            # Only apply shift if there's an actual change and the previous hunk ends before this one
-            if hunk_net_change != 0 and prev_hunk.end_line < hunk.start_line:
-                cumulative_shift += hunk_net_change
+            # CRITICAL FIX: More precise overlap detection
+            if hunk_net_change != 0:
+                # Check if previous hunk ends before this one starts (non-overlapping)
+                if prev_hunk.end_line < hunk.start_line:
+                    cumulative_shift += hunk_net_change
+                elif prev_hunk.end_line >= hunk.start_line:
+                    # Overlapping case - be more conservative
+                    # Only apply partial shift to avoid over-adjustment
+                    partial_shift = hunk_net_change // 2
+                    cumulative_shift += partial_shift
         
-        # Apply adjustment to new start position based on cumulative changes
-        # The old_start stays at the original position for this hunk
-        # The new_start gets adjusted based on all previous changes
-        adjusted_new_start = max(1, hunk.start_line + cumulative_shift)
+        # Apply conservative adjustment
+        if cumulative_shift != 0:
+            adjusted_new_start = max(1, hunk.start_line + cumulative_shift)
+            # For overlapping hunks, also adjust old_start slightly
+            if i > 0:
+                prev_hunk = sorted_hunks[i - 1]
+                if prev_hunk.end_line >= hunk.start_line:
+                    adjusted_old_start = max(1, hunk.start_line - 1)
         
         adjustments[hunk.id] = (adjusted_old_start, adjusted_new_start)
     
@@ -948,7 +983,153 @@ def _create_valid_git_patch(hunks: List[Hunk], base_diff: str) -> str:
     if patch_content and not any('\\' in line and 'No newline' in line for line in patch_parts):
         patch_content += '\n'
     
+    # CRITICAL FIX: Enhanced patch validation - only reject truly malformed patches
+    if patch_content and not _validate_patch_format_lenient(patch_content):
+        print("Warning: Generated patch appears to be severely malformed, attempting repair...")
+        # Try to repair the patch instead of returning empty
+        repaired_patch = _attempt_patch_repair(patch_content, hunks, base_diff)
+        if repaired_patch:
+            print("✓ Successfully repaired malformed patch")
+            return repaired_patch
+        else:
+            print("Error: Could not repair patch, this may cause application failures")
+            # Return the original patch anyway - git apply errors are better than lost content
+            return patch_content
+    
     return patch_content
+
+
+def _validate_patch_format(patch_content: str) -> bool:
+    """
+    Validate that a patch has proper git patch format.
+    
+    Args:
+        patch_content: The patch content to validate
+        
+    Returns:
+        True if patch format is valid, False otherwise
+    """
+    if not patch_content.strip():
+        return False
+    
+    lines = patch_content.split('\n')
+    
+    # Must start with diff header
+    if not any(line.startswith('diff --git') for line in lines):
+        return False
+    
+    # Must have proper hunk headers
+    hunk_count = sum(1 for line in lines if line.startswith('@@'))
+    if hunk_count == 0:
+        return False
+    
+    # Check for malformed hunk headers
+    for line in lines:
+        if line.startswith('@@'):
+            # Hunk header should match pattern: @@ -old_start,old_count +new_start,new_count @@
+            if not line.count('@@') >= 2:
+                return False
+            if '-' not in line or '+' not in line:
+                return False
+    
+    # Check for suspicious content patterns that could cause corruption
+    for line in lines:
+        # Empty lines at start of hunks can cause issues
+        if line.startswith('@@') and lines.index(line) + 1 < len(lines):
+            next_line = lines[lines.index(line) + 1]
+            if next_line == '':
+                print(f"Warning: Empty line immediately after hunk header: {line}")
+    
+    return True
+
+
+def _validate_patch_format_lenient(patch_content: str) -> bool:
+    """
+    Lenient patch validation that only rejects severely malformed patches.
+    
+    Args:
+        patch_content: The patch content to validate
+        
+    Returns:
+        True if patch is not severely malformed, False only for truly broken patches
+    """
+    if not patch_content.strip():
+        return False
+    
+    lines = patch_content.split('\n')
+    
+    # Must have at least some recognizable git patch structure
+    has_diff_header = any(line.startswith('diff --git') for line in lines)
+    has_hunk_header = any(line.startswith('@@') for line in lines)
+    
+    # Accept patch if it has basic structure, even if not perfect
+    return has_diff_header or has_hunk_header
+
+
+def _attempt_patch_repair(patch_content: str, hunks: List[Hunk], base_diff: str) -> Optional[str]:
+    """
+    Attempt to repair a malformed patch by regenerating it from hunks.
+    
+    Args:
+        patch_content: The malformed patch content
+        hunks: The original hunks
+        base_diff: The base diff for header extraction
+        
+    Returns:
+        Repaired patch content or None if repair failed
+    """
+    try:
+        print("Attempting to repair patch by regenerating from original hunks...")
+        
+        # Try to regenerate patch using simpler logic
+        patch_parts = []
+        
+        # Group hunks by file
+        hunks_by_file = {}
+        for hunk in hunks:
+            if hunk.file_path not in hunks_by_file:
+                hunks_by_file[hunk.file_path] = []
+            hunks_by_file[hunk.file_path].append(hunk)
+        
+        # Extract headers from base diff
+        original_headers = _extract_original_headers(base_diff)
+        
+        for file_path, file_hunks in hunks_by_file.items():
+            # Add file header
+            if file_path in original_headers:
+                patch_parts.extend(original_headers[file_path])
+            else:
+                # Minimal fallback header
+                patch_parts.extend([
+                    f"diff --git a/{file_path} b/{file_path}",
+                    f"index 0000000..1111111 100644",
+                    f"--- a/{file_path}",
+                    f"+++ b/{file_path}"
+                ])
+            
+            # Add hunks in original order without line number adjustments
+            sorted_hunks = sorted(file_hunks, key=lambda h: h.start_line)
+            for hunk in sorted_hunks:
+                hunk_lines = hunk.content.split('\n')
+                # Use original hunk content without modifications
+                for line in hunk_lines:
+                    patch_parts.append(line)
+        
+        repaired_content = '\n'.join(patch_parts)
+        
+        # Only add newline if no "No newline at end of file" marker
+        if repaired_content and not any('\\' in line and 'No newline' in line for line in patch_parts):
+            repaired_content += '\n'
+        
+        # Validate the repair
+        if _validate_patch_format_lenient(repaired_content):
+            return repaired_content
+        
+        return None
+        
+    except Exception as e:
+        print(f"Patch repair failed: {e}")
+        return None
 
 
 def _hunks_need_line_recalculation(hunks: List[Hunk]) -> bool:
