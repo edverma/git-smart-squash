@@ -252,9 +252,10 @@ def _apply_patch_with_git(patch_content: str) -> bool:
             patch_file_path = patch_file.name
 
         try:
-            # Apply patch using git apply --cached for atomic staging
+            # Apply patch using git apply --index to update both staging area and working directory
+            # This ensures that the working directory is immediately synchronized with the staging area
             result = subprocess.run(
-                ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
+                ['git', 'apply', '--index', '--whitespace=nowarn', patch_file_path],
                 capture_output=True,
                 text=True,
                 cwd=os.getcwd()
@@ -265,9 +266,31 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                 return True
             else:
                 print(f"Git apply failed: {result.stderr}")
-                # Rollback staging state
-                _restore_staging_state(staging_state)
-                return False
+                # If --index fails, fallback to --cached and then sync working directory
+                result_cached = subprocess.run(
+                    ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
+                    capture_output=True,
+                    text=True,
+                    cwd=os.getcwd()
+                )
+                
+                if result_cached.returncode == 0:
+                    print("✓ Patch applied to staging area, syncing working directory...")
+                    # Force working directory to match staging area
+                    try:
+                        subprocess.run(['git', 'checkout-index', '-f', '-a'], check=True, capture_output=True)
+                        print("✓ Working directory synchronized")
+                        return True
+                    except subprocess.CalledProcessError as sync_error:
+                        print(f"Failed to sync working directory: {sync_error}")
+                        # Rollback staging state
+                        _restore_staging_state(staging_state)
+                        return False
+                else:
+                    print(f"Git apply --cached also failed: {result_cached.stderr}")
+                    # Rollback staging state
+                    _restore_staging_state(staging_state)
+                    return False
 
         finally:
             # Clean up temporary file

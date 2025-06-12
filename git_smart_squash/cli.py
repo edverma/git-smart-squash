@@ -379,6 +379,10 @@ class GitSmartSquashCLI:
                                         # Update working directory to match the commit
                                         # This ensures files reflect the committed state
                                         subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+                                        
+                                        # Additional sync to ensure working directory is fully updated
+                                        # Force git to refresh the working directory state
+                                        subprocess.run(['git', 'status'], capture_output=True, check=True)
                                     else:
                                         self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
                                 else:
@@ -410,6 +414,10 @@ class GitSmartSquashCLI:
                                     
                                     # Update working directory to match the commit
                                     subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+                                    
+                                    # Additional sync to ensure working directory is fully updated
+                                    # Force git to refresh the working directory state
+                                    subprocess.run(['git', 'status'], capture_output=True, check=True)
                         except Exception as e:
                             self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
                     
