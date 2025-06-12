@@ -252,9 +252,9 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
                     hunk_lines[0] = corrected_header
                 
                 # Add corrected hunk
+                # CRITICAL FIX: Don't filter out empty lines - they're significant in git patches
                 for line in hunk_lines:
-                    if line:
-                        patch_parts.append(line)
+                    patch_parts.append(line)
         else:
             # Single hunk - use original logic with validation
             for hunk in sorted_hunks:
@@ -277,9 +277,9 @@ def create_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
                             print(f"✓ Created fallback header: {fallback_header}")
                 
                 # Add the hunk lines
+                # CRITICAL FIX: Don't filter out empty lines - they're significant in git patches
                 for line in hunk_lines:
-                    if line:  # Skip completely empty lines
-                        patch_parts.append(line)
+                    patch_parts.append(line)
     
     return '\n'.join(patch_parts) + '\n' if patch_parts else ""
 
@@ -778,26 +778,28 @@ def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, 
     # For overlapping hunks, we need to be much more conservative
     # The key insight: only adjust line numbers if hunks actually interfere
     for i, hunk in enumerate(sorted_hunks):
-        # Start with original line numbers
+        # Start with original line numbers - both old and new should start from the same base
+        # since we're applying to the current state after reset to main
         adjusted_old_start = hunk.start_line
         adjusted_new_start = hunk.start_line
         
-        # Only apply cumulative shifts for hunks that come after overlapping changes
+        # Apply cumulative shifts from all previous hunks that change file size
         cumulative_shift = 0
         for j in range(i):
             prev_hunk = sorted_hunks[j]
             
-            # Only count shift from hunks that actually affect this hunk's position
-            if prev_hunk.end_line >= hunk.start_line - 3:  # Within context range
-                additions, deletions = _count_hunk_changes(prev_hunk)
-                cumulative_shift += additions - deletions
+            # All previous hunks that change file size affect this hunk's line numbers
+            additions, deletions = _count_hunk_changes(prev_hunk)
+            hunk_net_change = additions - deletions
+            
+            # Only apply shift if there's an actual change and the previous hunk ends before this one
+            if hunk_net_change != 0 and prev_hunk.end_line < hunk.start_line:
+                cumulative_shift += hunk_net_change
         
-        # Apply conservative adjustment
-        adjusted_new_start = hunk.start_line + cumulative_shift
-        
-        # Ensure we don't go below line 1
-        adjusted_old_start = max(1, adjusted_old_start)
-        adjusted_new_start = max(1, adjusted_new_start)
+        # Apply adjustment to new start position based on cumulative changes
+        # The old_start stays at the original position for this hunk
+        # The new_start gets adjusted based on all previous changes
+        adjusted_new_start = max(1, hunk.start_line + cumulative_shift)
         
         adjustments[hunk.id] = (adjusted_old_start, adjusted_new_start)
     
@@ -887,31 +889,48 @@ def _create_valid_git_patch(hunks: List[Hunk], base_diff: str) -> str:
                     old_count = deletions + context
                     new_count = additions + context
                     
+                    # Validate counts - git requires positive counts in most cases
+                    # If count is 0, it usually means 1 line of context
+                    if old_count == 0 and (deletions > 0 or additions > 0):
+                        old_count = 1
+                    if new_count == 0 and (deletions > 0 or additions > 0):
+                        new_count = 1
+                    
                     # Create corrected header
                     corrected_header = f"@@ -{adjusted_old_start},{old_count} +{adjusted_new_start},{new_count} @@"
                     
                     # Add context from original if present
                     if '@@' in hunk_lines[0]:
                         parts = hunk_lines[0].split('@@')
-                        if len(parts) >= 3:
+                        if len(parts) >= 3 and parts[2].strip():
                             corrected_header += f" {parts[2]}"
                     
-                    hunk_lines[0] = corrected_header
+                    # Validate the header format before using it
+                    if _validate_hunk_header(corrected_header):
+                        hunk_lines[0] = corrected_header
+                    else:
+                        # Fall back to reconstructing from scratch
+                        fallback_header = _reconstruct_hunk_header(hunk, hunk_lines)
+                        if fallback_header and _validate_hunk_header(fallback_header):
+                            hunk_lines[0] = fallback_header
+                        else:
+                            print(f"Warning: Could not create valid header for hunk {hunk.id}, using original")
+                            # Keep original header as last resort
                 
                 # Add corrected hunk to patch
+                # CRITICAL FIX: Don't filter out empty lines - they're significant in git patches
                 for line in hunk_lines:
-                    if line:
-                        patch_parts.append(line)
+                    patch_parts.append(line)
         else:
             # Use original hunk content without modification
             # This preserves the correct line numbers from the original diff
             for hunk in sorted_hunks:
                 hunk_lines = hunk.content.split('\n')
                 
-                # Add original hunk content directly
+                # Add original hunk content directly  
+                # CRITICAL FIX: Don't filter out empty lines - they're significant in git patches
                 for line in hunk_lines:
-                    if line:
-                        patch_parts.append(line)
+                    patch_parts.append(line)
     
     return '\n'.join(patch_parts) + '\n' if patch_parts else ""
 
@@ -920,8 +939,9 @@ def _hunks_need_line_recalculation(hunks: List[Hunk]) -> bool:
     """
     Determine if hunks in the same file need line number recalculation.
     
-    We only need to recalculate line numbers when hunks actually overlap
-    or are close enough to interfere with each other's line numbers.
+    We need to recalculate line numbers when:
+    1. Hunks actually overlap
+    2. Earlier hunks change the file size, affecting later hunks' line numbers
     
     Args:
         hunks: List of hunks in the same file, sorted by start_line
@@ -932,14 +952,27 @@ def _hunks_need_line_recalculation(hunks: List[Hunk]) -> bool:
     if len(hunks) <= 1:
         return False
     
-    # Check for overlapping or closely adjacent hunks
-    for i in range(len(hunks) - 1):
+    # Check if any earlier hunk would affect later hunks' line numbers
+    cumulative_change = 0
+    
+    for i in range(len(hunks)):
         current_hunk = hunks[i]
-        next_hunk = hunks[i + 1]
         
-        # Check if hunks overlap or are very close (within 3 lines)
-        # Close hunks might interfere with each other's context lines
-        if current_hunk.end_line + 3 >= next_hunk.start_line:
+        # Check if this hunk directly overlaps with the next one
+        if i < len(hunks) - 1:
+            next_hunk = hunks[i + 1]
+            # True overlap requires recalculation
+            if current_hunk.end_line >= next_hunk.start_line:
+                return True
+        
+        # Update cumulative change from this hunk
+        additions, deletions = _count_hunk_changes(current_hunk)
+        hunk_change = additions - deletions
+        cumulative_change += hunk_change
+        
+        # If there's any cumulative change and more hunks to process,
+        # we need to recalculate line numbers for subsequent hunks
+        if cumulative_change != 0 and i < len(hunks) - 1:
             return True
     
     return False

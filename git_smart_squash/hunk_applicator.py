@@ -248,6 +248,7 @@ def _apply_patch_with_git(patch_content: str) -> bool:
         # Create temporary patch file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as patch_file:
             patch_file.write(patch_content)
+            patch_file.flush()  # CRITICAL FIX: Ensure content is written to disk before git reads it
             patch_file_path = patch_file.name
 
         try:
@@ -377,14 +378,16 @@ def _parse_hunk_content(hunk: Hunk) -> Tuple[List[str], List[str], List[str]]:
     context_lines = []
 
     for line in hunk.content.split('\n')[1:]:  # Skip header
-        if not line:
-            continue
-        elif line.startswith('+') and not line.startswith('+++'):
+        # CRITICAL FIX: Don't filter out empty lines - they're significant in git diffs
+        if line.startswith('+') and not line.startswith('+++'):
             additions.append(line[1:])  # Remove + prefix
         elif line.startswith('-') and not line.startswith('---'):
             deletions.append(line[1:])  # Remove - prefix
         elif line.startswith(' '):
             context_lines.append(line[1:])  # Remove space prefix
+        elif not line:
+            # Empty lines are context lines (preserve file structure)
+            context_lines.append('')
 
     return additions, deletions, context_lines
 
