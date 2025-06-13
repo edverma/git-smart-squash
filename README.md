@@ -156,13 +156,6 @@ For large diffs, try:
 
 Check out our [detailed documentation](https://github.com/your-username/git-smart-squash) or open an issue!
 
-## 📚 Learn More
-
-- **[Installation Options](https://github.com/your-username/git-smart-squash#installation)** - pipx, source install
-- **[Advanced Usage](https://github.com/your-username/git-smart-squash/blob/main/FUNCTIONALITY.md)** - all CLI options
-- **[How It Works](https://github.com/your-username/git-smart-squash/blob/main/OLLAMA_INTEGRATION.md)** - technical details
-- **[Contributing](https://github.com/your-username/git-smart-squash/blob/main/CONTRIBUTING.md)** - help make it better!
-
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
