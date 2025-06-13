@@ -320,7 +320,8 @@ index 0000000..3456789
                 ])
                 
                 with patch('sys.stdout'):  # Suppress output
-                    self.cli.run_smart_squash(args)
+                    with patch.object(self.cli, 'get_user_confirmation', return_value=False):
+                        self.cli.run_smart_squash(args)
                 
                 # Verify the AI was called with instructions
                 mock_generate.assert_called_once()

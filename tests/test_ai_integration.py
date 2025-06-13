@@ -684,7 +684,9 @@ def test_authenticate_failure():
                 # Create mock args
                 class MockArgs:
                     base = 'main'
-                    dry_run = True
+                    auto_apply = False
+                    instructions = None
+                    no_attribution = False
 
                 args = MockArgs()
 

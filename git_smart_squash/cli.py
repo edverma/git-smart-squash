@@ -153,9 +153,9 @@ class GitSmartSquashCLI:
                     self.console.print("\n[green]Applying commit plan (--auto-apply flag provided)[/green]")
                 elif auto_apply_from_config:
                     self.console.print("\n[green]Auto-applying commit plan (configured in settings)[/green]")
-                self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
+                self.apply_commit_plan(commit_plan, hunks, full_diff, args.base, args.no_attribution)
             elif self.get_user_confirmation():
-                self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
+                self.apply_commit_plan(commit_plan, hunks, full_diff, args.base, args.no_attribution)
             else:
                 self.console.print("Operation cancelled.")
                     
@@ -345,7 +345,7 @@ class GitSmartSquashCLI:
         response = input("Continue? (y/N): ")
         return response.lower().strip() == 'y'
     
-    def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], hunks: List[Hunk], full_diff: str, base_branch: str):
+    def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool = False):
         """Apply the commit plan using hunk-based staging."""
         try:
             with Progress(
@@ -408,7 +408,7 @@ class GitSmartSquashCLI:
                                     if result.stdout.strip():
                                         # Add attribution to commit message if not disabled
                                         commit_message = commit['message']
-                                        if not args.no_attribution and self.config.attribution.enabled:
+                                        if not no_attribution and self.config.attribution.enabled:
                                             attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
                                             full_message = commit_message + attribution
                                         else:
@@ -453,7 +453,7 @@ class GitSmartSquashCLI:
                                                       capture_output=True, text=True)
                                 if result.stdout.strip():
                                     # Add attribution to commit message if not disabled
-                                    if not args.no_attribution and self.config.attribution.enabled:
+                                    if not no_attribution and self.config.attribution.enabled:
                                         attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
                                         full_message = 'chore: remaining uncommitted changes' + attribution
                                     else:
