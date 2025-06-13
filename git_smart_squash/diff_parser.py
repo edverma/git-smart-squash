@@ -317,176 +317,14 @@ def _extract_original_hunks_raw(base_diff: str) -> Dict[str, str]:
     return hunks_map
 
 
-def _create_enhanced_hunk_patch(hunks: List[Hunk], base_diff: str) -> str:
-    """
-    Enhanced patch creation now redirects to absolutely minimal approach.
-    
-    This function now simply calls the absolutely minimal patch creation
-    to ensure no content modification occurs anywhere in the codebase.
-    
-    Args:
-        hunks: List of hunks to include in the patch
-        base_diff: Original full diff output for header extraction
-        
-    Returns:
-        Minimal patch content that preserves all original content
-    """
-    print("Enhanced patch creation redirecting to absolutely minimal approach...")
-    return _create_absolutely_minimal_patch(hunks, base_diff)
 
 
-def _repair_hunk_header_ultra_conservative(hunk: Hunk, hunk_lines: List[str]) -> Optional[str]:
-    """
-    Ultra-conservative hunk header repair that prioritizes safety over accuracy.
-    
-    Args:
-        hunk: The hunk object
-        hunk_lines: Lines of hunk content
-        
-    Returns:
-        Repaired header or None if repair not possible
-    """
-    try:
-        # Count actual content lines (exclude the bad header)
-        content_lines = hunk_lines[1:] if len(hunk_lines) > 1 else []
-        
-        additions = sum(1 for line in content_lines if line.startswith('+') and not line.startswith('+++'))
-        deletions = sum(1 for line in content_lines if line.startswith('-') and not line.startswith('---'))
-        context = sum(1 for line in content_lines if line.startswith(' '))
-        
-        # Use the hunk's line numbers directly without any fancy calculations
-        old_start = max(1, hunk.start_line)
-        new_start = max(1, hunk.start_line)
-        
-        old_count = max(1, deletions + context)
-        new_count = max(1, additions + context)
-        
-        # Create ultra-simple header
-        return f"@@ -{old_start},{old_count} +{new_start},{new_count} @@"
-        
-    except Exception as e:
-        print(f"Header repair failed: {e}")
-        return None
 
 
-def _finalize_patch_content_ultra_conservative(patch_parts: List[str]) -> str:
-    """
-    Ultra-conservative patch finalization that completely avoids "No newline" corruption.
-    
-    Args:
-        patch_parts: List of patch lines
-        
-    Returns:
-        Finalized patch content with guaranteed newline ending
-    """
-    if not patch_parts:
-        return ""
-    
-    # ULTRA-CONSERVATIVE: Always ensure proper newline ending, completely ignore "No newline" markers
-    patch_content = '\n'.join(patch_parts)
-    
-    # ALWAYS add trailing newline for maximum git compatibility
-    if not patch_content.endswith('\n'):
-        patch_content += '\n'
-    
-    return patch_content
 
 
-def _repair_patch_ultra_conservative(hunks: List[Hunk], base_diff: str) -> Optional[str]:
-    """
-    Ultra-conservative patch repair that builds from scratch with minimal format.
-    
-    Args:
-        hunks: Original hunks
-        base_diff: Base diff for headers
-        
-    Returns:
-        Ultra-safe patch or None if repair failed
-    """
-    try:
-        print("Ultra-conservative repair: Building patch from scratch...")
-        
-        # Group hunks by file
-        hunks_by_file = {}
-        for hunk in hunks:
-            if hunk.file_path not in hunks_by_file:
-                hunks_by_file[hunk.file_path] = []
-            hunks_by_file[hunk.file_path].append(hunk)
-        
-        # Extract headers
-        original_headers = _extract_original_headers(base_diff)
-        
-        patch_parts = []
-        
-        for file_path, file_hunks in hunks_by_file.items():
-            # Add minimal file header
-            if file_path in original_headers:
-                patch_parts.extend(original_headers[file_path])
-            else:
-                patch_parts.extend([
-                    f"diff --git a/{file_path} b/{file_path}",
-                    f"index 0000000..1111111 100644",
-                    f"--- a/{file_path}",
-                    f"+++ b/{file_path}"
-                ])
-            
-            # Add hunks with ultra-conservative processing
-            sorted_hunks = sorted(file_hunks, key=lambda h: h.start_line)
-            for hunk in sorted_hunks:
-                hunk_lines = hunk.content.split('\n')
-                
-                # Build ultra-safe hunk
-                safe_lines = []
-                for i, line in enumerate(hunk_lines):
-                    # Skip ALL "No newline" markers
-                    if line.startswith('\\') and 'No newline' in line:
-                        continue
-                    
-                    # For hunk header, create minimal safe version
-                    if i == 0 and line.startswith('@@'):
-                        # Create minimal header
-                        content_lines = hunk_lines[1:]
-                        additions = sum(1 for l in content_lines if l.startswith('+') and not l.startswith('+++'))
-                        deletions = sum(1 for l in content_lines if l.startswith('-') and not l.startswith('---'))
-                        context = sum(1 for l in content_lines if l.startswith(' '))
-                        
-                        old_start = max(1, hunk.start_line)
-                        new_start = max(1, hunk.start_line)
-                        old_count = max(1, deletions + context)
-                        new_count = max(1, additions + context)
-                        
-                        safe_lines.append(f"@@ -{old_start},{old_count} +{new_start},{new_count} @@")
-                    else:
-                        # Preserve content lines exactly
-                        safe_lines.append(line)
-                
-                patch_parts.extend(safe_lines)
-        
-        # Build final patch content
-        repaired_content = '\n'.join(patch_parts)
-        if not repaired_content.endswith('\n'):
-            repaired_content += '\n'
-        
-        return repaired_content
-        
-    except Exception as e:
-        print(f"Ultra-conservative patch repair failed: {e}")
-        return None
 
 
-def _create_minimal_patch_fallback(hunks: List[Hunk], base_diff: str) -> str:
-    """
-    Final fallback using the absolutely minimal approach.
-    
-    Args:
-        hunks: List of hunks
-        base_diff: Base diff for headers
-        
-    Returns:
-        Minimal patch that git can apply
-    """
-    print("Using absolutely minimal fallback approach...")
-    return _create_absolutely_minimal_patch(hunks, base_diff)
 
 
 def validate_hunk_combination(hunks: List[Hunk]) -> Tuple[bool, str]:
@@ -1123,27 +961,6 @@ def _validate_patch_format(patch_content: str) -> bool:
     return True
 
 
-def _validate_patch_format_lenient(patch_content: str) -> bool:
-    """
-    Lenient patch validation that only rejects severely malformed patches.
-    
-    Args:
-        patch_content: The patch content to validate
-        
-    Returns:
-        True if patch is not severely malformed, False only for truly broken patches
-    """
-    if not patch_content.strip():
-        return False
-    
-    lines = patch_content.split('\n')
-    
-    # Must have at least some recognizable git patch structure
-    has_diff_header = any(line.startswith('diff --git') for line in lines)
-    has_hunk_header = any(line.startswith('@@') for line in lines)
-    
-    # Accept patch if it has basic structure, even if not perfect
-    return has_diff_header or has_hunk_header
 
 
 def _attempt_patch_repair(patch_content: str, hunks: List[Hunk], base_diff: str) -> Optional[str]:
@@ -1599,36 +1416,6 @@ def _validate_patch_comprehensive(patch_content: str) -> Tuple[bool, List[str]]:
     return len(issues) == 0, issues
 
 
-def _validate_patch_conservative(patch_content: str) -> bool:
-    """
-    Conservative patch validation that only rejects clearly broken patches.
-    
-    Args:
-        patch_content: Patch content to validate
-        
-    Returns:
-        True if patch appears valid
-    """
-    if not patch_content.strip():
-        return False
-    
-    lines = patch_content.split('\n')
-    
-    # Must have some git patch structure
-    has_diff_header = any(line.startswith('diff --git') for line in lines)
-    has_hunk_header = any(line.startswith('@@') for line in lines)
-    
-    # Check for basic sanity
-    if not (has_diff_header or has_hunk_header):
-        return False
-    
-    # Check for obviously malformed hunk headers
-    for line in lines:
-        if line.startswith('@@'):
-            if not re.match(r'@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@', line):
-                return False
-    
-    return True
 
 
 def _repair_patch_conservative(patch_content: str, hunks: List[Hunk], base_diff: str) -> Optional[str]:

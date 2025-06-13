@@ -735,122 +735,12 @@ def _parse_hunk_content(hunk: Hunk) -> Tuple[List[str], List[str], List[str]]:
     return additions, deletions, context_lines
 
 
-def _is_file_operation_hunk(hunk: Hunk) -> bool:
-    """
-    Determine if a hunk represents a file creation or deletion operation.
-
-    Args:
-        hunk: The hunk to check
-
-    Returns:
-        True if this is a file operation hunk
-    """
-    # Check if this is a file deletion (hunk ID shows 0-0 range)
-    if hunk.start_line == 0 and hunk.end_line == 0:
-        return True
-
-    # Check if file doesn't exist (creation case)
-    if not os.path.exists(hunk.file_path):
-        return True
-
-    # Check hunk content for file operation markers
-    hunk_content = hunk.content
-    if 'new file mode' in hunk_content or 'deleted file mode' in hunk_content:
-        return True
-
-    # Check if hunk contains only additions (likely file creation)
-    additions, deletions, _ = _parse_hunk_content(hunk)
-    if not deletions and len(additions) > 5:  # Threshold for "new file"
-        return True
-
-    return False
-
-
-def _apply_file_operation_hunk(hunk: Hunk, additions: list, deletions: list) -> bool:
-    """
-    Handle file creation and deletion operations specially.
-
-    Args:
-        hunk: The hunk representing file operation
-        additions: Lines being added
-        deletions: Lines being deleted
-
-    Returns:
-        True if operation succeeded
-    """
-    try:
-        # File deletion case (including 0-0 range hunks)
-        if hunk.start_line == 0 and hunk.end_line == 0:
-            if os.path.exists(hunk.file_path):
-                print(f"Deleting file: {hunk.file_path}")
-                result = subprocess.run(['git', 'rm', hunk.file_path], capture_output=True, text=True)
-                return result.returncode == 0
-            else:
-                print(f"File {hunk.file_path} already deleted, staging deletion")
-                # File is already deleted from filesystem, but we need to stage the deletion
-                result = subprocess.run(['git', 'add', hunk.file_path], capture_output=True, text=True)
-                return result.returncode == 0
-
-        # File creation case
-        elif not os.path.exists(hunk.file_path) and additions:
-            print(f"Creating new file: {hunk.file_path}")
-            os.makedirs(os.path.dirname(hunk.file_path), exist_ok=True)
-            with open(hunk.file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(additions) + '\n' if additions else '')
-
-            # Stage the new file
-            result = subprocess.run(['git', 'add', hunk.file_path], capture_output=True, text=True)
-            return result.returncode == 0
-
-        # Check if this is actually a content modification that should be handled differently
-        elif os.path.exists(hunk.file_path):
-            # Fall back to git native patch application
-            from .diff_parser import _create_valid_git_patch
-            patch_content = _create_valid_git_patch([hunk], "")
-            if patch_content.strip():
-                return _apply_patch_with_git(patch_content)
-            return False
-
-        else:
-            print(f"Unclear file operation for {hunk.file_path}")
-            return False
-
-    except Exception as e:
-        print(f"Error handling file operation for {hunk.file_path}: {e}")
-        return False
 
 
 
 
-def _lines_match_fuzzy(file_lines: list, target_lines: list, threshold: float = 0.7) -> bool:
-    """
-    Check if lines match with fuzzy matching (handles whitespace, etc.).
 
-    Args:
-        file_lines: Lines from the current file
-        target_lines: Lines we're trying to match
-        threshold: Minimum match ratio (0.0 to 1.0)
 
-    Returns:
-        True if lines match above threshold
-    """
-    if len(file_lines) != len(target_lines):
-        return False
-
-    if not target_lines:
-        return True
-
-    matches = 0
-    for file_line, target_line in zip(file_lines, target_lines):
-        # Normalize whitespace and compare
-        if file_line.strip() == target_line.strip():
-            matches += 1
-        # Also allow partial matches for similar content
-        elif target_line.strip() in file_line.strip() or file_line.strip() in target_line.strip():
-            matches += 0.5
-
-    match_ratio = matches / len(target_lines)
-    return match_ratio >= threshold
 
 
 
@@ -870,45 +760,6 @@ def apply_hunks_with_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk],
     return apply_hunks(hunk_ids, hunks_by_id, base_diff)
 
 
-def _apply_files_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk]) -> bool:
-    """
-    Fallback method: stage entire files that contain the specified hunks.
-
-    Args:
-        hunk_ids: List of hunk IDs
-        hunks_by_id: Dictionary mapping hunk IDs to Hunk objects
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Get unique file paths from the hunks
-        file_paths = set()
-        for hunk_id in hunk_ids:
-            if hunk_id in hunks_by_id:
-                file_paths.add(hunks_by_id[hunk_id].file_path)
-
-        if not file_paths:
-            return True
-
-        # Stage the files
-        for file_path in file_paths:
-            result = subprocess.run(
-                ['git', 'add', file_path],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-
-            if result.returncode != 0:
-                print(f"Failed to stage file {file_path}: {result.stderr}")
-                return False
-
-        return True
-
-    except Exception as e:
-        print(f"Error in file fallback: {e}")
-        return False
 
 
 def reset_staging_area():

@@ -85,3 +85,6 @@ Formula/
 conda-recipe/
 git-smart-squash-local.rb
 git-smart-squash.rb
+
+.claude/
+.ropeproject/
