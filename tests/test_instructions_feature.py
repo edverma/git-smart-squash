@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from .test_utils import timeout
 from git_smart_squash.cli import GitSmartSquashCLI
-from git_smart_squash.simple_config import Config, AIConfig, HunkConfig, ConfigManager
+from git_smart_squash.simple_config import Config, AIConfig, HunkConfig, ConfigManager, AttributionConfig
 from git_smart_squash.diff_parser import parse_diff, Hunk
 
 
@@ -76,13 +76,12 @@ index 0000000..3456789
         self.assertEqual(args.instructions, 'Separate tests from implementation')
         
         # Test with other options
-        args = parser.parse_args(['--dry-run', '--instructions', 'Custom rules', '--base', 'develop'])
+        args = parser.parse_args(['--instructions', 'Custom rules', '--base', 'develop'])
         self.assertEqual(args.instructions, 'Custom rules')
-        self.assertTrue(args.dry_run)
         self.assertEqual(args.base, 'develop')
         
         # Test no instructions provided
-        args = parser.parse_args(['--dry-run'])
+        args = parser.parse_args([])
         self.assertIsNone(args.instructions)
 
     @timeout(10)
@@ -140,7 +139,9 @@ index 0000000..3456789
                 model='gpt-4.1',
                 instructions='Default instructions from config'
             ),
-            hunks=HunkConfig()
+            hunks=HunkConfig(),
+            attribution=AttributionConfig(),
+            auto_apply=False
         )
         
         self.cli.config = config
@@ -149,8 +150,8 @@ index 0000000..3456789
         mock_args = MagicMock()
         mock_args.instructions = 'Override instructions from CLI'
         mock_args.base = 'main'
-        mock_args.dry_run = True
-        mock_args.yes = False
+        mock_args.auto_apply = False
+        mock_args.no_attribution = False
         
         with patch.object(self.cli, 'get_full_diff') as mock_diff:
             mock_diff.return_value = self.sample_diff
@@ -159,7 +160,8 @@ index 0000000..3456789
                 mock_analyze.return_value = [{'message': 'test', 'hunk_ids': [], 'rationale': 'test'}]
                 
                 with patch.object(self.cli, 'display_commit_plan'):
-                    self.cli.run_smart_squash(mock_args)
+                    with patch.object(self.cli, 'get_user_confirmation', return_value=False):
+                        self.cli.run_smart_squash(mock_args)
                 
                 # Verify that CLI instructions were used
                 mock_analyze.assert_called_once()
@@ -171,7 +173,9 @@ index 0000000..3456789
         """Test that instructions are correctly passed through to AI provider."""
         config = Config(
             ai=AIConfig(provider='openai', model='gpt-4.1'),
-            hunks=HunkConfig()
+            hunks=HunkConfig(),
+            attribution=AttributionConfig(),
+            auto_apply=False
         )
         self.cli.config = config
         
@@ -312,7 +316,6 @@ index 0000000..3456789
                 # Run with custom instructions
                 parser = self.cli.create_parser()
                 args = parser.parse_args([
-                    '--dry-run',
                     '--instructions', 'Separate database and API layers'
                 ])
                 
