@@ -61,11 +61,6 @@ class GitSmartSquashCLI:
             help='Base branch to compare against (default: main)'
         )
         
-        parser.add_argument(
-            '--dry-run',
-            action='store_true',
-            help='Show proposed commit structure without applying'
-        )
         
         parser.add_argument(
             '--ai-provider',
@@ -84,9 +79,22 @@ class GitSmartSquashCLI:
         )
         
         parser.add_argument(
-            '--yes', '-y',
+            '--auto-apply',
             action='store_true',
-            help='Automatically accept the generated commit plan without confirmation'
+            help='Apply the commit plan immediately without confirmation'
+        )
+        
+        
+        parser.add_argument(
+            '--instructions', '-i',
+            type=str,
+            help='Custom instructions for AI to follow when organizing commits (e.g., "Group by feature area", "Separate tests from implementation")'
+        )
+        
+        parser.add_argument(
+            '--no-attribution',
+            action='store_true',
+            help='Disable the attribution message in commit messages'
         )
         
         return parser
@@ -126,7 +134,9 @@ class GitSmartSquashCLI:
                 
                 # 3. Send hunks to AI for commit organization
                 progress.update(task, description="Analyzing changes with AI...")
-                commit_plan = self.analyze_with_ai(hunks, full_diff)
+                # Use custom instructions from CLI args, or fall back to config
+                custom_instructions = args.instructions or self.config.ai.instructions
+                commit_plan = self.analyze_with_ai(hunks, full_diff, custom_instructions)
             
             if not commit_plan:
                 self.console.print("[red]Failed to generate commit plan[/red]")
@@ -135,17 +145,19 @@ class GitSmartSquashCLI:
             # 3. Display the plan
             self.display_commit_plan(commit_plan)
             
-            # 4. Execute or dry run
-            if args.dry_run:
-                self.console.print("\n[green]Dry run complete. Use without --dry-run to apply changes.[/green]")
+            # 4. Ask for confirmation (unless auto-applying)
+            # Auto-apply if --auto-apply flag is provided or if config says to auto-apply
+            auto_apply_from_config = getattr(self.config, 'auto_apply', False)
+            if args.auto_apply or auto_apply_from_config:
+                if args.auto_apply:
+                    self.console.print("\n[green]Applying commit plan (--auto-apply flag provided)[/green]")
+                elif auto_apply_from_config:
+                    self.console.print("\n[green]Auto-applying commit plan (configured in settings)[/green]")
+                self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
+            elif self.get_user_confirmation():
+                self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
             else:
-                # Auto-accept if --yes flag is provided, otherwise ask for confirmation
-                if args.yes or self.get_user_confirmation():
-                    if args.yes:
-                        self.console.print("\n[green]Auto-accepting commit plan (--yes flag provided)[/green]")
-                    self.apply_commit_plan(commit_plan, hunks, full_diff, args.base)
-                else:
-                    self.console.print("Operation cancelled.")
+                self.console.print("Operation cancelled.")
                     
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
@@ -185,7 +197,7 @@ class GitSmartSquashCLI:
                         continue
             raise Exception(f"Could not get diff from {base_branch}: {e.stderr}")
     
-    def analyze_with_ai(self, hunks: List[Hunk], full_diff: str) -> Optional[List[Dict[str, Any]]]:
+    def analyze_with_ai(self, hunks: List[Hunk], full_diff: str, custom_instructions: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
         """Send hunks to AI and get back commit organization plan."""
         try:
             # Ensure config is loaded
@@ -195,7 +207,7 @@ class GitSmartSquashCLI:
             ai_provider = UnifiedAIProvider(self.config)
             
             # Build hunk-based prompt
-            prompt = self._build_hunk_prompt(hunks)
+            prompt = self._build_hunk_prompt(hunks, custom_instructions)
             
             response = ai_provider.generate(prompt)
             
@@ -209,7 +221,7 @@ class GitSmartSquashCLI:
             self.console.print(f"[red]AI analysis failed: {e}[/red]")
             return None
     
-    def _build_hunk_prompt(self, hunks: List[Hunk]) -> str:
+    def _build_hunk_prompt(self, hunks: List[Hunk], custom_instructions: Optional[str] = None) -> str:
         """Build a prompt that shows individual hunks with context for AI analysis."""
         
         prompt_parts = [
@@ -219,8 +231,22 @@ class GitSmartSquashCLI:
             "based on functionality, not just file location. A single commit can contain hunks from",
             "multiple files if they implement the same feature or fix.",
             "",
+        ]
+        
+        # Add custom instructions if provided
+        if custom_instructions:
+            prompt_parts.extend([
+                "CUSTOM INSTRUCTIONS FROM USER:",
+                custom_instructions,
+                "",
+            ])
+        
+        prompt_parts.extend([
             "For each commit, provide:",
-            "1. A conventional commit message (type: description)",
+            "1. A properly formatted git commit message following these rules:",
+            "   - First line: max 80 characters (type: brief description)",
+            "   - If more detail needed: empty line, then body with lines max 80 chars",
+            "   - Use conventional commit format: feat:, fix:, docs:, test:, refactor:, etc.",
             "2. The specific hunk IDs that should be included (not file paths!)",
             "3. A brief rationale for why these changes belong together",
             "",
@@ -228,18 +254,21 @@ class GitSmartSquashCLI:
             "{",
             '  "commits": [',
             "    {",
-            '      "message": "feat: add user authentication system",',
+            '      "message": "feat: add user authentication system\\n\\nImplemented JWT-based authentication with refresh tokens.\\nAdded user model with secure password hashing.",',
             '      "hunk_ids": ["auth.py:45-89", "models.py:23-45", "auth.py:120-145"],',
             '      "rationale": "Groups authentication functionality together"',
             "    }",
             "  ]",
             "}",
             "",
-            "IMPORTANT: Use hunk_ids (not files) and group by logical functionality.",
+            "IMPORTANT:",
+            "- Use hunk_ids (not files) and group by logical functionality",
+            "- First line of commit message MUST be ≤80 characters",
+            "- Use \\n for line breaks in multi-line messages",
             "",
             "CODE CHANGES TO ANALYZE:",
             ""
-        ]
+        ])
         
         # Add each hunk with its context
         for hunk in hunks:
@@ -377,9 +406,17 @@ class GitSmartSquashCLI:
                                                           capture_output=True, text=True)
                                     
                                     if result.stdout.strip():
+                                        # Add attribution to commit message if not disabled
+                                        commit_message = commit['message']
+                                        if not args.no_attribution and self.config.attribution.enabled:
+                                            attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
+                                            full_message = commit_message + attribution
+                                        else:
+                                            full_message = commit_message
+                                        
                                         # Create the commit
                                         subprocess.run([
-                                            'git', 'commit', '-m', commit['message']
+                                            'git', 'commit', '-m', full_message
                                         ], check=True)
                                         commits_created += 1
                                         all_applied_hunk_ids.update(hunk_ids)
@@ -415,8 +452,15 @@ class GitSmartSquashCLI:
                                 result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
                                                       capture_output=True, text=True)
                                 if result.stdout.strip():
+                                    # Add attribution to commit message if not disabled
+                                    if not args.no_attribution and self.config.attribution.enabled:
+                                        attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
+                                        full_message = 'chore: remaining uncommitted changes' + attribution
+                                    else:
+                                        full_message = 'chore: remaining uncommitted changes'
+                                    
                                     subprocess.run([
-                                        'git', 'commit', '-m', 'chore: remaining uncommitted changes'
+                                        'git', 'commit', '-m', full_message
                                     ], check=True)
                                     commits_created += 1
                                     self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")

@@ -12,6 +12,7 @@ class AIConfig:
     provider: str = "local"
     model: str = "devstral"
     api_key_env: Optional[str] = None
+    instructions: Optional[str] = None
 
 
 @dataclass
@@ -22,11 +23,19 @@ class HunkConfig:
     max_hunks_per_prompt: int = 100
 
 
+@dataclass
+class AttributionConfig:
+    """Attribution message configuration."""
+    enabled: bool = True
+
+
 @dataclass 
 class Config:
     """Simplified configuration."""
     ai: AIConfig
     hunks: HunkConfig
+    attribution: AttributionConfig
+    auto_apply: bool = False
 
 
 class ConfigManager:
@@ -81,7 +90,8 @@ class ConfigManager:
         ai_config = AIConfig(
             provider=provider,
             model=model,
-            api_key_env=config_data.get('ai', {}).get('api_key_env')
+            api_key_env=config_data.get('ai', {}).get('api_key_env'),
+            instructions=config_data.get('ai', {}).get('instructions')
         )
         
         # Load hunk configuration
@@ -92,7 +102,16 @@ class ConfigManager:
             max_hunks_per_prompt=hunk_config_data.get('max_hunks_per_prompt', 100)
         )
         
-        return Config(ai=ai_config, hunks=hunk_config)
+        # Load attribution configuration
+        attribution_config_data = config_data.get('attribution', {})
+        attribution_config = AttributionConfig(
+            enabled=attribution_config_data.get('enabled', True)
+        )
+        
+        # Load auto-apply setting
+        auto_apply = config_data.get('auto_apply', False)
+        
+        return Config(ai=ai_config, hunks=hunk_config, attribution=attribution_config, auto_apply=auto_apply)
     
     def create_default_config(self, global_config: bool = False) -> str:
         """Create a default config file."""
@@ -106,7 +125,11 @@ class ConfigManager:
                 'show_hunk_context': True,
                 'context_lines': 3,
                 'max_hunks_per_prompt': 100
-            }
+            },
+            'attribution': {
+                'enabled': True
+            },
+            'auto_apply': False
         }
         
         if global_config:

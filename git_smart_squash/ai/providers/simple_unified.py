@@ -11,10 +11,10 @@ class UnifiedAIProvider:
     
     # Provider-specific hard maximum context token limits
     PROVIDER_MAX_CONTEXT_TOKENS = {
-        'ollama': 32000,      # Ollama hard maximum
-        'openai': 1000000,    # OpenAI hard maximum
-        'gemini': 1000000,    # Gemini hard maximum
-        'anthropic': 200000   # Anthropic hard maximum
+        'local': 32000,       # Ollama hard maximum
+        'openai': 1000000,    # OpenAI hard maximum (1M tokens)
+        'gemini': 1000000,    # Gemini hard maximum (1M tokens)
+        'anthropic': 200000   # Anthropic hard maximum (200k tokens)
     }
     
     # Conservative defaults
@@ -101,9 +101,15 @@ class UnifiedAIProvider:
         """Calculate optimal token parameters based on prompt size for any provider."""
         prompt_tokens = self._estimate_tokens(prompt)
         
+        # Get provider-specific context limit
+        provider_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get(
+            self.provider_type, 
+            self.DEFAULT_MAX_CONTEXT_TOKENS
+        )
+        
         # Check if prompt exceeds our maximum supported context
-        if prompt_tokens > self.MAX_CONTEXT_TOKENS - 2000:  # Reserve 2000 for response
-            raise Exception(f"Diff is too large ({prompt_tokens} tokens). Maximum supported: {self.MAX_CONTEXT_TOKENS - 2000} tokens. Consider breaking down your changes into smaller commits.")
+        if prompt_tokens > provider_limit - 2000:  # Reserve 2000 for response
+            raise Exception(f"Diff is too large ({prompt_tokens} tokens). Maximum supported: {provider_limit - 2000} tokens. Consider breaking down your changes into smaller commits.")
         
         # Ensure context window is always sufficient for prompt + substantial response buffer
         # Use larger buffer for complex tasks and be more conservative
@@ -111,13 +117,13 @@ class UnifiedAIProvider:
         context_needed = prompt_tokens + response_buffer
         
         # Ensure we never exceed hard limits but always accommodate the full prompt
-        max_tokens = min(context_needed, self.MAX_CONTEXT_TOKENS)
+        max_tokens = min(context_needed, provider_limit)
         
-        # If context_needed exceeds MAX_CONTEXT_TOKENS, we must fit within limits
+        # If context_needed exceeds provider_limit, we must fit within limits
         # but ensure response space is reasonable
-        if context_needed > self.MAX_CONTEXT_TOKENS:
+        if context_needed > provider_limit:
             # Reserve at least 1000 tokens for response, use rest for prompt
-            max_tokens = self.MAX_CONTEXT_TOKENS
+            max_tokens = provider_limit
             response_buffer = min(response_buffer, 1000)
         
         # Set prediction tokens based on expected response size
@@ -134,20 +140,23 @@ class UnifiedAIProvider:
         """Calculate optimal num_ctx and num_predict for Ollama based on prompt size."""
         params = self._calculate_dynamic_params(prompt)
         
+        # Get the provider-specific limit
+        provider_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('local', 32000)
+        
         # For large prompts, use the full context window to maximize capacity
         # For smaller prompts, optimize for efficiency
         estimated_prompt_tokens = params["prompt_tokens"]
         
         # If the dynamic calculation already uses most of the context window,
         # just use the maximum to avoid weird intermediate values
-        if params["max_tokens"] > self.MAX_CONTEXT_TOKENS * 0.8:
-            num_ctx = self.MAX_CONTEXT_TOKENS
+        if params["max_tokens"] > provider_limit * 0.8:
+            num_ctx = provider_limit
         else:
             # Use 15% safety margin since token estimation may be imperfect
             min_context_needed = int(estimated_prompt_tokens * 1.15) + 1000  # 15% safety margin + response space
             num_ctx = max(params["max_tokens"], min_context_needed)
             # Respect absolute maximum
-            num_ctx = min(num_ctx, self.MAX_CONTEXT_TOKENS)
+            num_ctx = min(num_ctx, provider_limit)
         
         return {
             "num_ctx": num_ctx,
@@ -248,15 +257,8 @@ class UnifiedAIProvider:
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
             
-            # OpenAI context limits vary by model
-            model_limits = {
-                'gpt-4.1': 1000000,
-                'gpt-4.1-mini': 1000000,
-                'gpt-4.1-nano': 1000000,
-            }
-            
-            # Get context limit for current model, default to conservative limit
-            model_context_limit = model_limits.get(self.config.ai.model, 8192)
+            # Use provider-level context limit
+            model_context_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('openai', 1000000)
             
             # Check if prompt exceeds model context limit
             if params["prompt_tokens"] > model_context_limit - 1000:  # Reserve 1000 for response
@@ -316,15 +318,8 @@ class UnifiedAIProvider:
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
             
-            # Anthropic context limits vary by model
-            model_limits = {
-                'claude-sonnet-4-20250514': 200000,  # Assuming similar to Claude 3.5
-                'claude-opus-4-20250514': 200000,
-                'claude-3-5-haiku-20241022': 200000
-            }
-            
-            # Get context limit for current model, default to 200k
-            model_context_limit = model_limits.get(self.config.ai.model, 200000)
+            # Use provider-level context limit
+            model_context_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('anthropic', 200000)
             
             # Check if prompt exceeds model context limit
             if params["prompt_tokens"] > model_context_limit - 4000:  # Reserve 4000 for response
@@ -389,14 +384,8 @@ class UnifiedAIProvider:
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
             
-            # Gemini context limits vary by model
-            model_limits = {
-                'gemini-2.5-pro-preview-06-05': 1000000,
-                'gemini-2.5-flash-preview-05-20': 1000000,
-            }
-            
-            # Get context limit for current model, default to 32k
-            model_context_limit = model_limits.get(self.config.ai.model, 32768)
+            # Use provider-level context limit
+            model_context_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('gemini', 1000000)
             
             # Check if prompt exceeds model context limit
             if params["prompt_tokens"] > model_context_limit - 4000:  # Reserve 4000 for response

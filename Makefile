@@ -114,7 +114,7 @@ docs:
 
 # Demo the tool on current repository
 demo:
-	python3 -m git_smart_squash.cli --dry-run --no-ai
+	python3 -m git_smart_squash.cli --no-ai
 
 # Development setup
 dev-setup: install
