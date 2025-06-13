@@ -154,7 +154,7 @@ For large diffs, try:
 
 ### Need More Help?
 
-Check out our [detailed documentation](https://github.com/your-username/git-smart-squash) or open an issue!
+Check out our [detailed documentation](https://github.com/edverma/git-smart-squash/DOCUMENTATION.md) or open an issue!
 
 ## License
 
