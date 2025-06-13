@@ -16,7 +16,7 @@ import json
 # Add the package to the path for testing
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from test_utils import timeout
+from .test_utils import timeout
 from git_smart_squash.cli import GitSmartSquashCLI
 from git_smart_squash.simple_config import Config, AIConfig, HunkConfig, ConfigManager
 from git_smart_squash.diff_parser import parse_diff, Hunk

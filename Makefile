@@ -33,13 +33,13 @@ test-cov:
 
 # Lint code
 lint:
-	flake8 git_smart_squash/
-	mypy git_smart_squash/
+	flake8 git_smart_squash/ tests/
+	mypy git_smart_squash/ tests/
 
 # Format code
 format:
 	black git_smart_squash/
-	black git_smart_squash/tests/
+	black tests/
 
 # Clean build artifacts
 clean:
