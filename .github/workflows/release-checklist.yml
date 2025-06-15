@@ -1,0 +1,58 @@
+name: Release Checklist
+
+on:
+  pull_request:
+    types: [opened, edited]
+    branches:
+      - main
+    paths:
+      - 'git_smart_squash/VERSION'
+
+jobs:
+  checklist:
+    name: Verify Release Checklist
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check PR Body for Checklist
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const body = context.payload.pull_request.body || '';
+          const requiredItems = [
+            '- [ ] Version bumped in git_smart_squash/VERSION',
+            '- [ ] CHANGELOG.md updated',
+            '- [ ] Tests passing',
+            '- [ ] Documentation updated',
+            '- [ ] Security considerations reviewed',
+            '- [ ] Breaking changes documented',
+            '- [ ] Upgrade guide provided (if needed)'
+          ];
+          
+          const missingItems = requiredItems.filter(item => !body.includes(item));
+          
+          if (missingItems.length > 0) {
+            const comment = `## Release Checklist Required
+          
+          Please ensure your PR description includes the following checklist:
+          
+          \`\`\`markdown
+          ${requiredItems.join('\n')}
+          \`\`\`
+          
+          **Missing items:**
+          ${missingItems.map(item => `- ${item.replace('- [ ] ', '')}`).join('\n')}
+          `;
+          
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+            core.setFailed('Release checklist incomplete. Please update the PR description.');
+          } else {
+            console.log('✅ Release checklist complete!');
+          }

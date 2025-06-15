@@ -1,0 +1,5 @@
+# This file defines code ownership for the repository
+# Each line is a file pattern followed by one or more owners
+
+# Set @edverma as the code owner for all files in the repository
+* @edverma
