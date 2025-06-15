@@ -13,9 +13,11 @@ help:
 	@echo "bump-patch      Bump patch version (x.x.N)"
 	@echo "bump-minor      Bump minor version (x.N.0)"
 	@echo "bump-major      Bump major version (N.0.0)"
-	@echo "publish         Auto-bump patch version and publish to PyPI"
-	@echo "publish-minor   Auto-bump minor version and publish to PyPI"
-	@echo "publish-major   Auto-bump major version and publish to PyPI"
+	@echo "release         Create GitHub release (auto-publishes to PyPI)"
+	@echo "release-minor   Create minor release (auto-publishes to PyPI)"
+	@echo "release-major   Create major release (auto-publishes to PyPI)"
+	@echo "publish-local   Manually publish to PyPI (requires credentials)"
+	@echo "publish-test    Publish to TestPyPI for testing"
 	@echo "docs            Generate documentation"
 	@echo "demo            Run demo on current repository"
 
@@ -64,48 +66,51 @@ bump-minor:
 bump-major:
 	@python3 scripts/bump_version.py major
 
-# Publish to PyPI (includes version bump, git tag, and upload)
-publish: clean
-	@echo "Publishing to PyPI..."
+# Create a new release (GitHub Actions will handle PyPI publishing)
+release: clean
+	@echo "Creating new release..."
 	@# Bump version
 	@NEW_VERSION=$$(python3 scripts/bump_version.py patch | grep "New version:" | cut -d' ' -f3) && \
 	echo "Bumped version to $$NEW_VERSION" && \
 	git add git_smart_squash/VERSION && \
 	git commit -m "chore: bump version to $$NEW_VERSION" && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	echo "Created git tag v$$NEW_VERSION" && \
-	python3 -m build && \
-	python3 -m twine upload dist/* && \
-	git push origin "v$$NEW_VERSION" && \
-	echo "✅ Successfully published version $$NEW_VERSION to PyPI and pushed tag!"
+	git push origin main && \
+	echo "Creating GitHub release..." && \
+	gh release create "v$$NEW_VERSION" --generate-notes && \
+	echo "✅ Release v$$NEW_VERSION created! GitHub Actions will publish to PyPI."
 
-# Publish with minor version bump
-publish-minor: clean
-	@echo "Publishing with minor version bump..."
+# Create minor release
+release-minor: clean
+	@echo "Creating minor release..."
 	@NEW_VERSION=$$(python3 scripts/bump_version.py minor | grep "New version:" | cut -d' ' -f3) && \
 	echo "Bumped version to $$NEW_VERSION" && \
 	git add git_smart_squash/VERSION && \
 	git commit -m "chore: bump version to $$NEW_VERSION" && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	echo "Created git tag v$$NEW_VERSION" && \
-	python3 -m build && \
-	python3 -m twine upload dist/* && \
-	git push origin "v$$NEW_VERSION" && \
-	echo "✅ Successfully published version $$NEW_VERSION to PyPI and pushed tag!"
+	git push origin main && \
+	gh release create "v$$NEW_VERSION" --generate-notes && \
+	echo "✅ Release v$$NEW_VERSION created! GitHub Actions will publish to PyPI."
 
-# Publish with major version bump
-publish-major: clean
-	@echo "Publishing with major version bump..."
+# Create major release
+release-major: clean
+	@echo "Creating major release..."
 	@NEW_VERSION=$$(python3 scripts/bump_version.py major | grep "New version:" | cut -d' ' -f3) && \
 	echo "Bumped version to $$NEW_VERSION" && \
 	git add git_smart_squash/VERSION && \
 	git commit -m "chore: bump version to $$NEW_VERSION" && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	echo "Created git tag v$$NEW_VERSION" && \
-	python3 -m build && \
-	python3 -m twine upload dist/* && \
-	git push origin "v$$NEW_VERSION" && \
-	echo "✅ Successfully published version $$NEW_VERSION to PyPI and pushed tag!"
+	git push origin main && \
+	gh release create "v$$NEW_VERSION" --generate-notes && \
+	echo "✅ Release v$$NEW_VERSION created! GitHub Actions will publish to PyPI."
+
+# Local publish for testing (requires PyPI credentials)
+publish-local: clean build
+	@echo "Publishing to PyPI using local credentials..."
+	@echo "⚠️  WARNING: Consider using 'make release' for secure OIDC-based publishing instead!"
+	@python3 -m twine upload dist/*
+
+# Publish to TestPyPI for testing
+publish-test: clean build
+	@echo "Publishing to TestPyPI..."
+	@python3 -m twine upload --repository testpypi dist/*
 
 # Generate documentation
 docs:
