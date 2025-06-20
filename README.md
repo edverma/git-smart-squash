@@ -1,6 +1,6 @@
 # Git Smart Squash
 
-Transform your messy commit history into clean, logical commits that reviewers will love
+Use AI to transform your messy commit history into clean, logical commits that reviewers will love
 
 ## Why Use Git Smart Squash?
 
