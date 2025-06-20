@@ -1,12 +1,12 @@
 # Git Smart Squash
 
-Transform your messy commit history into clean, logical commits that reviewers will love! 🎯
+Transform your messy commit history into clean, logical commits that reviewers will love!
 
 ## Why Use Git Smart Squash?
 
 Ever spent 30 minutes reorganizing commits before a PR? We've all been there. Git Smart Squash uses AI to automatically organize your changes into logical, well-structured commits in seconds.
 
-### ✨ What It Does
+### What It Does
 
 **Before** (your typical feature branch):
 ```
@@ -26,7 +26,7 @@ Ever spent 30 minutes reorganizing commits before a PR? We've all been there. Gi
 
 The AI analyzes your entire diff and groups related changes together, creating clean commit messages that follow conventional commit standards.
 
-## 🚀 Quick Start (2 minutes)
+## Quick Start (2 minutes)
 
 ### 1. Install
 
@@ -63,9 +63,9 @@ git-smart-squash
 git-smart-squash --auto-apply
 ```
 
-That's it! Your commits are now beautifully organized. 🎉
+That's it! Your commits are now beautifully organized.
 
-## 💡 Common Use Cases
+## Common Use Cases
 
 ### "I need to clean up before PR review"
 ```bash
@@ -88,7 +88,7 @@ git-smart-squash --ai-provider openai
 gss  # Same as git-smart-squash
 ```
 
-## 🛡️ Safety First
+## Safety First
 
 Don't worry - Git Smart Squash is designed to be safe:
 
@@ -105,7 +105,7 @@ git branch | grep backup  # Find your backup
 git reset --hard your-branch-backup-[timestamp]
 ```
 
-## 🤖 AI Provider Options
+## AI Provider Options
 
 | Provider | Cost | Privacy | Setup |
 |----------|------|---------|-------|
@@ -114,7 +114,7 @@ git reset --hard your-branch-backup-[timestamp]
 | **Anthropic** | ~$0.01/use | Cloud | Set `ANTHROPIC_API_KEY` |
 | **Gemini** | ~$0.01/use | Cloud | Set `GEMINI_API_KEY` |
 
-## ⚙️ Advanced Configuration (Optional)
+## Advanced Configuration (Optional)
 
 Want to customize? Create a config file:
 
@@ -130,7 +130,7 @@ ai:
   provider: local   # Always use local AI by default
 ```
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### "Ollama not found"
 Install Ollama from https://ollama.com and run:
@@ -162,6 +162,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Made with ❤️ for developers who want cleaner git history**
-
-*PS: Your git log will never be the same! 🚀*
+**Made with love for developers who want cleaner git history**
