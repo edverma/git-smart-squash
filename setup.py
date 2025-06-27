@@ -23,6 +23,7 @@ requirements = [
     "anthropic>=0.3.0",
     "tiktoken>=0.5.0",
     "google-generativeai>=0.8.5",
+    "GitPython>=3.1.0",  # For native Git operations
 ]
 
 
