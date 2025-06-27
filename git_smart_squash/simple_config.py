@@ -29,6 +29,14 @@ class AttributionConfig:
     enabled: bool = True
 
 
+@dataclass
+class FeatureFlags:
+    """Feature flags for gradual rollout."""
+    use_native_git_operations: bool = False
+    parallel_processing: bool = False
+    auto_conflict_resolution: bool = False
+
+
 @dataclass 
 class Config:
     """Simplified configuration."""
@@ -36,6 +44,7 @@ class Config:
     hunks: HunkConfig
     attribution: AttributionConfig
     auto_apply: bool = False
+    feature_flags: Optional[FeatureFlags] = None
 
 
 class ConfigManager:
@@ -111,7 +120,21 @@ class ConfigManager:
         # Load auto-apply setting
         auto_apply = config_data.get('auto_apply', False)
         
-        return Config(ai=ai_config, hunks=hunk_config, attribution=attribution_config, auto_apply=auto_apply)
+        # Load feature flags
+        feature_flags_data = config_data.get('feature_flags', {})
+        feature_flags = FeatureFlags(
+            use_native_git_operations=feature_flags_data.get('use_native_git_operations', False),
+            parallel_processing=feature_flags_data.get('parallel_processing', False),
+            auto_conflict_resolution=feature_flags_data.get('auto_conflict_resolution', False)
+        )
+        
+        return Config(
+            ai=ai_config, 
+            hunks=hunk_config, 
+            attribution=attribution_config, 
+            auto_apply=auto_apply,
+            feature_flags=feature_flags
+        )
     
     def create_default_config(self, global_config: bool = False) -> str:
         """Create a default config file."""
@@ -129,7 +152,12 @@ class ConfigManager:
             'attribution': {
                 'enabled': True
             },
-            'auto_apply': False
+            'auto_apply': False,
+            'feature_flags': {
+                'use_native_git_operations': False,
+                'parallel_processing': False,
+                'auto_conflict_resolution': False
+            }
         }
         
         if global_config:
