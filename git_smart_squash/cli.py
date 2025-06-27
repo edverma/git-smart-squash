@@ -9,11 +9,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+import os
 from .simple_config import ConfigManager
 from .ai.providers.simple_unified import UnifiedAIProvider
 from .diff_parser import parse_diff, Hunk
 from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area
 from .logger import get_logger, LogLevel
+from .strategies import GitNativeStrategy, LegacyPatchStrategy, LegacyToStrategyAdapter
 
 
 class GitSmartSquashCLI:
@@ -359,8 +361,16 @@ class GitSmartSquashCLI:
         response = input("Continue? (y/N): ")
         return response.lower().strip() == 'y'
     
+    def _create_native_strategy(self):
+        """Create native Git strategy."""
+        return GitNativeStrategy(os.getcwd())
+    
+    def _create_legacy_strategy(self, full_diff: str, hunks: List[Hunk]):
+        """Create legacy patch strategy."""
+        return LegacyPatchStrategy(os.getcwd(), full_diff, hunks)
+    
     def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool = False):
-        """Apply the commit plan using hunk-based staging."""
+        """Apply the commit plan using the appropriate strategy."""
         try:
             with Progress(
                 SpinnerColumn(),
@@ -383,137 +393,96 @@ class GitSmartSquashCLI:
                 
                 # 3. Reset to base branch
                 progress.update(task, description="Resetting to base branch...")
-                # Use --hard reset to ensure working directory is clean
-                # This is safe because we've already created a backup branch
                 subprocess.run(['git', 'reset', '--hard', base_branch], check=True)
                 
-                # 4. Create new commits based on the plan
-                progress.update(task, description="Creating new commits...")
+                # 4. Decide which strategy to use based on feature flag
+                progress.update(task, description="Preparing commit strategy...")
                 
-                if commit_plan:
-                    commits_created = 0
+                use_native_git = (
+                    self.config.feature_flags and 
+                    self.config.feature_flags.use_native_git_operations
+                )
+                
+                if use_native_git:
+                    self.console.print("[cyan]Using native Git operations (experimental)[/cyan]")
+                    strategy = self._create_native_strategy()
+                else:
+                    self.console.print("[cyan]Using legacy patch-based approach[/cyan]")
+                    strategy = self._create_legacy_strategy(full_diff, hunks)
+                
+                # 5. Convert commit plan to CommitGroup objects
+                commit_groups = LegacyToStrategyAdapter.create_commit_groups(
+                    commit_plan, hunks_by_id
+                )
+                
+                # Add attribution to commit messages if needed
+                if not no_attribution and self.config.attribution.enabled:
+                    attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
+                    for group in commit_groups:
+                        group.message += attribution
+                
+                # 6. Apply commits using the selected strategy
+                progress.update(task, description="Applying commits...")
+                result = strategy.apply_commits(commit_groups)
+                
+                if result.is_success:
+                    # Count successful commits
+                    commits_created = sum(
+                        1 for r in result.data 
+                        if hasattr(r, 'is_success') and r.is_success
+                    ) if isinstance(result.data, list) else len(commit_groups)
+                    
+                    # Handle remaining hunks
                     all_applied_hunk_ids = set()
+                    for group in commit_groups:
+                        all_applied_hunk_ids.update(h.id for h in group.hunks)
                     
-                    for i, commit in enumerate(commit_plan):
-                        progress.update(task, description=f"Creating commit {i+1}/{len(commit_plan)}: {commit['message'][:50]}...")
-                        
-                        # Reset staging area before each commit
-                        reset_staging_area()
-                        
-                        # Get hunk IDs for this commit
-                        hunk_ids = commit.get('hunk_ids', [])
-                        
-                        # Backward compatibility: handle old format with files
-                        if not hunk_ids and commit.get('files'):
-                            # Convert files to hunk IDs by finding hunks that belong to those files
-                            file_paths = commit.get('files', [])
-                            hunk_ids = [hunk.id for hunk in hunks if hunk.file_path in file_paths]
-                        
-                        if hunk_ids:
-                            try:
-                                # Apply hunks using the hunk applicator
-                                self.logger.debug(f"Attempting to apply {len(hunk_ids)} hunks for commit: {commit['message']}")
-                                self.logger.debug(f"Hunk IDs: {hunk_ids}")
-                                
-                                success = apply_hunks_with_fallback(hunk_ids, hunks_by_id, full_diff)
-                                
-                                self.logger.debug(f"Hunk application result: {'success' if success else 'failed'}")
-                                
-                                if success:
-                                    # Check if there are actually staged changes
-                                    result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
-                                                          capture_output=True, text=True)
-                                    
-                                    staged_files = result.stdout.strip()
-                                    self.logger.debug(f"Staged files after hunk application: {staged_files if staged_files else 'NONE'}")
-                                    
-                                    if staged_files:
-                                        # Add attribution to commit message if not disabled
-                                        commit_message = commit['message']
-                                        if not no_attribution and self.config.attribution.enabled:
-                                            attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
-                                            full_message = commit_message + attribution
-                                        else:
-                                            full_message = commit_message
-                                        
-                                        # Create the commit
-                                        subprocess.run([
-                                            'git', 'commit', '-m', full_message
-                                        ], check=True)
-                                        commits_created += 1
-                                        all_applied_hunk_ids.update(hunk_ids)
-                                        self.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
-                                        
-                                        # Update working directory to match the commit
-                                        # This ensures files reflect the committed state
-                                        subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-                                        
-                                        # Additional sync to ensure working directory is fully updated
-                                        # Force git to refresh the working directory state
-                                        subprocess.run(['git', 'status'], capture_output=True, check=True)
-                                    else:
-                                        self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
-                                        self.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
-                                        self.logger.debug("This can happen when:")
-                                        self.logger.debug("  - Hunks failed to apply due to conflicts")
-                                        self.logger.debug("  - Hunks were already applied in a previous commit")
-                                        self.logger.debug("  - The patch content was invalid or empty")
-                                        self.logger.debug("Run with --debug to see detailed hunk application logs")
-                                else:
-                                    self.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
-                                    self.logger.error(f"Hunk application failed for commit: {commit['message']}")
-                                    self.logger.debug(f"Failed hunk IDs: {hunk_ids}")
-                                    
-                            except Exception as e:
-                                self.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
-                        else:
-                            self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]")
+                    # Process results
+                    if isinstance(result.data, list):
+                        for i, (group, res) in enumerate(zip(commit_groups, result.data)):
+                            if hasattr(res, 'is_success') and res.is_success:
+                                self.console.print(f"[green]✓ Created commit: {group.message.split(chr(10))[0]}[/green]")
+                            else:
+                                self.console.print(f"[red]Failed to apply commit '{group.message.split(chr(10))[0]}'[/red]")
                     
-                    # 5. Check for remaining hunks that weren't included in any commit
+                    # 7. Check for remaining hunks that weren't included in any commit
                     remaining_hunk_ids = [hunk.id for hunk in hunks if hunk.id not in all_applied_hunk_ids]
                     
                     if remaining_hunk_ids:
                         progress.update(task, description="Creating final commit for remaining changes...")
-                        reset_staging_area()
                         
-                        try:
-                            success = apply_hunks_with_fallback(remaining_hunk_ids, hunks_by_id, full_diff)
-                            if success:
-                                result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
-                                                      capture_output=True, text=True)
-                                if result.stdout.strip():
-                                    # Add attribution to commit message if not disabled
-                                    if not no_attribution and self.config.attribution.enabled:
-                                        attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
-                                        full_message = 'chore: remaining uncommitted changes' + attribution
-                                    else:
-                                        full_message = 'chore: remaining uncommitted changes'
-                                    
-                                    subprocess.run([
-                                        'git', 'commit', '-m', full_message
-                                    ], check=True)
-                                    commits_created += 1
-                                    self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
-                                    
-                                    # Update working directory to match the commit
-                                    subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-                                    
-                                    # Additional sync to ensure working directory is fully updated
-                                    # Force git to refresh the working directory state
-                                    subprocess.run(['git', 'status'], capture_output=True, check=True)
-                        except Exception as e:
-                            self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
+                        remaining_group = LegacyToStrategyAdapter.handle_remaining_hunks(
+                            hunks, all_applied_hunk_ids
+                        )
+                        
+                        if remaining_group:
+                            # Add attribution if needed
+                            if not no_attribution and self.config.attribution.enabled:
+                                attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
+                                remaining_group.message += attribution
+                            
+                            # Apply the remaining changes
+                            remaining_result = strategy.apply_commits([remaining_group])
+                            if remaining_result.is_success:
+                                commits_created += 1
+                                self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
+                            else:
+                                self.console.print(f"[red]Error creating final commit[/red]")
                     
-                    # Working directory is now kept in sync after each commit,
-                    # so no need for a final reset
-                    
+                    # Final summary
                     self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
                     self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")
+                else:
+                    self.console.print(f"[red]Strategy failed: {result.message}[/red]")
+                    # Restore from backup
+                    subprocess.run(['git', 'checkout', backup_branch], check=True)
+                    subprocess.run(['git', 'branch', '-D', current_branch], check=True)
+                    subprocess.run(['git', 'checkout', '-b', current_branch], check=True)
+                    self.console.print(f"[yellow]Restored to original state from backup[/yellow]")
                 
         except subprocess.CalledProcessError as e:
             self.console.print(f"[red]Failed to apply commit plan: {e}[/red]")
             sys.exit(1)
-
 
 def main():
     """Entry point for the git-smart-squash command."""
