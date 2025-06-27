@@ -1,0 +1,33 @@
+# Example configuration file for git-smart-squash with native Git operations enabled
+
+# AI Provider Configuration
+ai:
+  provider: local  # Options: local, openai, anthropic, gemini
+  model: devstral  # Model to use for AI analysis
+  # api_key_env: OPENAI_API_KEY  # Environment variable for API key (if needed)
+  # instructions: "Custom instructions for commit organization"
+
+# Hunk Processing Configuration
+hunks:
+  show_hunk_context: true
+  context_lines: 3
+  max_hunks_per_prompt: 100
+
+# Attribution Configuration
+attribution:
+  enabled: true  # Add attribution message to commits
+
+# Auto-apply commits without confirmation
+auto_apply: false
+
+# Feature Flags (NEW)
+feature_flags:
+  # Enable native Git operations instead of patch-based approach
+  # This resolves line number shift issues by using Git's native commit operations
+  use_native_git_operations: true
+  
+  # Enable parallel processing for independent commits (future feature)
+  parallel_processing: false
+  
+  # Enable automatic conflict resolution (future feature)
+  auto_conflict_resolution: false
