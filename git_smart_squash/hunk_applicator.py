@@ -7,6 +7,9 @@ import subprocess
 import tempfile
 from typing import List, Dict, Optional, Tuple, Set
 from .diff_parser import Hunk, validate_hunk_combination, create_dependency_groups
+from .logger import get_logger
+
+logger = get_logger()
 
 
 class HunkApplicatorError(Exception):
@@ -62,17 +65,17 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     # Create dependency groups
     dependency_groups = create_dependency_groups(hunks)
 
-    print(f"Dependency analysis: {len(dependency_groups)} groups identified")
+    logger.hunk_debug(f"Dependency analysis: {len(dependency_groups)} groups identified")
     for i, group in enumerate(dependency_groups):
-        print(f"  Group {i+1}: {len(group)} hunks")
+        logger.hunk_debug(f"  Group {i+1}: {len(group)} hunks")
         for hunk in group:
             deps = len(hunk.dependencies)
             dependents = len(hunk.dependents)
-            print(f"    - {hunk.id} ({hunk.change_type}, deps: {deps}, dependents: {dependents})")
+            logger.hunk_debug(f"    - {hunk.id} ({hunk.change_type}, deps: {deps}, dependents: {dependents})")
 
     # Apply groups in order
     for i, group in enumerate(dependency_groups):
-        print(f"Applying group {i+1}/{len(dependency_groups)} ({len(group)} hunks)...")
+        logger.hunk_debug(f"Applying group {i+1}/{len(dependency_groups)} ({len(group)} hunks)...")
 
         # CRITICAL FIX: Save staging state before attempting group application
         # This prevents corrupt patch failures from leaving the repository in a broken state
@@ -86,17 +89,17 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
             success = _apply_dependency_group_atomically(group, base_diff)
 
             if not success:
-                print("  Atomic application failed, trying sequential with smart ordering...")
+                logger.hunk_debug("  Atomic application failed, trying sequential with smart ordering...")
                 # Fallback to sequential application with dependency ordering
                 success = _apply_dependency_group_sequentially(group, base_diff)
 
         if not success:
-            print(f"Failed to apply group {i+1}, restoring staging state...")
+            logger.error(f"Failed to apply group {i+1}, restoring staging state...")
             # CRITICAL FIX: Restore staging state to prevent broken repository state
             _restore_staging_state(group_staging_state)
             return False
 
-        print(f"✓ Group {i+1} applied successfully")
+        logger.hunk_debug(f"✓ Group {i+1} applied successfully")
 
     return True
 
@@ -118,14 +121,14 @@ def _apply_dependency_group_atomically(hunks: List[Hunk], base_diff: str) -> boo
         patch_content = _create_valid_git_patch(hunks, base_diff)
 
         if not patch_content.strip():
-            print("No valid patch content generated")
+            logger.warning("No valid patch content generated")
             return False
 
         # Apply using git's native mechanism
         return _apply_patch_with_git(patch_content)
 
     except Exception as e:
-        print(f"Error in atomic application: {e}")
+        logger.error(f"Error in atomic application: {e}")
         return False
 
 
@@ -152,11 +155,11 @@ def _apply_dependency_group_sequentially(hunks: List[Hunk], base_diff: str) -> b
         try:
             success = _relocate_and_apply_hunk(hunk, base_diff)
             if not success:
-                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(ordered_hunks)}) via git apply")
+                logger.warning(f"Failed to apply hunk {hunk.id} ({i+1}/{len(ordered_hunks)}) via git apply")
                 return False
 
         except Exception as e:
-            print(f"Error applying hunk {hunk.id}: {e}")
+            logger.error(f"Error applying hunk {hunk.id}: {e}")
             return False
 
     return True
@@ -201,7 +204,7 @@ def _topological_sort_hunks(hunks: List[Hunk]) -> List[Hunk]:
 
     # Check for cycles
     if len(result) != len(hunks):
-        print("Warning: Cyclic dependencies detected, using fallback ordering")
+        logger.warning("Cyclic dependencies detected, using fallback ordering")
         return []
 
     return result
@@ -226,11 +229,11 @@ def _apply_hunks_sequentially(hunks: List[Hunk], base_diff: str) -> bool:
             # Use git native patch application
             success = _relocate_and_apply_hunk(hunk, base_diff)
             if not success:
-                print(f"Failed to apply hunk {hunk.id} ({i+1}/{len(sorted_hunks)}) via git apply")
+                logger.warning(f"Failed to apply hunk {hunk.id} ({i+1}/{len(sorted_hunks)}) via git apply")
                 return False
 
         except Exception as e:
-            print(f"Error applying hunk {hunk.id}: {e}")
+            logger.error(f"Error applying hunk {hunk.id}: {e}")
             return False
 
     return True
@@ -301,11 +304,11 @@ def _sync_files_from_staging(file_paths: Set[str]) -> bool:
             )
             
             if result.returncode != 0:
-                print(f"Failed to sync {file_path}: {result.stderr}")
+                logger.error(f"Failed to sync {file_path}: {result.stderr}")
                 all_success = False
                 
         except Exception as e:
-            print(f"Error syncing {file_path}: {e}")
+            logger.error(f"Error syncing {file_path}: {e}")
             all_success = False
     
     return all_success
@@ -350,7 +353,7 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                     if patch_verification != patch_content:
                         raise Exception("Patch file write verification failed")
             except Exception as e:
-                print(f"Patch file validation failed: {e}")
+                logger.error(f"Patch file validation failed: {e}")
                 # Restore states and return failure
                 _restore_working_dir_state(working_dir_state, affected_files)
                 _restore_staging_state(original_staging_state)
@@ -358,6 +361,10 @@ def _apply_patch_with_git(patch_content: str) -> bool:
             
             # Apply patch using git apply --index to update both staging area and working directory
             # This ensures that the working directory is immediately synchronized with the staging area
+            logger.patch_debug(patch_content)
+            logger.hunk_debug(f"Attempting to apply patch from file: {patch_file_path}")
+            logger.hunk_debug(f"Affected files: {affected_files}")
+            
             result = subprocess.run(
                 ['git', 'apply', '--index', '--whitespace=nowarn', patch_file_path],
                 capture_output=True,
@@ -366,18 +373,18 @@ def _apply_patch_with_git(patch_content: str) -> bool:
             )
 
             if result.returncode == 0:
-                print("✓ Patch applied successfully via git apply --index")
+                logger.hunk_debug("✓ Patch applied successfully via git apply --index")
                 # CRITICAL FIX: Verify working directory matches expected state after successful apply
                 if _verify_working_dir_integrity(affected_files, patch_content):
                     return True
                 else:
-                    print("Warning: Working directory integrity check failed after successful patch apply")
+                    logger.warning("Working directory integrity check failed after successful patch apply")
                     # Don't fail here, but log the issue
                     return True
             else:
-                print(f"Git apply --index failed: {result.stderr}")
+                logger.hunk_debug(f"Git apply --index failed: {result.stderr}")
                 # CRITICAL FIX: Immediately restore BOTH working directory and staging states
-                print("Restoring working directory and staging states after --index failure...")
+                logger.hunk_debug("Restoring working directory and staging states after --index failure...")
                 _restore_working_dir_state(working_dir_state, affected_files)
                 _restore_staging_state(original_staging_state)
                 
@@ -390,23 +397,29 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                 )
                 
                 if result_cached.returncode == 0:
-                    print("✓ Patch applied to staging area, syncing working directory...")
+                    logger.hunk_debug("✓ Patch applied to staging area, syncing working directory...")
                     
                     # Sync only the affected files from staging to working directory
                     # This is more precise than syncing all files with checkout-index -a
                     sync_success = _sync_files_from_staging(affected_files)
                     
                     if sync_success:
-                        print("✓ Working directory synchronized for affected files")
+                        logger.hunk_debug("✓ Working directory synchronized for affected files")
                         return True
                     else:
-                        print("Failed to sync working directory")
+                        logger.error("Failed to sync working directory")
                         # CRITICAL FIX: Restore both staging and working directory states
                         _restore_staging_state(staging_state)
                         _restore_working_dir_state(working_dir_state, affected_files)
                         return False
                 else:
-                    print(f"Git apply --cached also failed: {result_cached.stderr}")
+                    logger.error(f"Git apply --cached also failed: {result_cached.stderr}")
+                    logger.hunk_debug(f"Full error output: {result_cached.stdout}")
+                    logger.hunk_debug("Common reasons for patch failure:")
+                    logger.hunk_debug("  - Hunk context doesn't match current file state")
+                    logger.hunk_debug("  - File has been modified since diff was generated")
+                    logger.hunk_debug("  - Patch is trying to modify non-existent lines")
+                    logger.hunk_debug("  - Whitespace or line ending differences")
                     # CRITICAL FIX: Restore both staging and working directory states
                     _restore_staging_state(staging_state)
                     _restore_working_dir_state(working_dir_state, affected_files)
@@ -417,7 +430,7 @@ def _apply_patch_with_git(patch_content: str) -> bool:
             os.unlink(patch_file_path)
 
     except Exception as e:
-        print(f"Error applying patch with git: {e}")
+        logger.error(f"Error applying patch with git: {e}")
         # CRITICAL FIX: Restore working directory state on any exception
         try:
             _restore_working_dir_state(working_dir_state, affected_files)
@@ -519,16 +532,16 @@ def _save_working_dir_state(affected_files: Set[str]) -> Dict[str, str]:
                 if file_states[file_path] is not None and os.path.exists(file_path):
                     expected_size = os.path.getsize(file_path)
                     if expected_size > 0 and len(file_states[file_path]) == 0:
-                        print(f"Warning: File {file_path} appears non-empty but read as empty")
+                        logger.warning(f"File {file_path} appears non-empty but read as empty")
                         
             except Exception as e:
-                print(f"Warning: Could not save state for {file_path}: {e}")
+                logger.warning(f"Could not save state for {file_path}: {e}")
                 # Continue with other files
         
-        print(f"Successfully saved working directory state for {len(file_states)} files")
+        logger.hunk_debug(f"Successfully saved working directory state for {len(file_states)} files")
         return file_states
     except Exception as e:
-        print(f"Error saving working directory state: {e}")
+        logger.error(f"Error saving working directory state: {e}")
         return {}
 
 
@@ -545,7 +558,7 @@ def _restore_working_dir_state(saved_states: Dict[str, str], affected_files: Set
     """
     try:
         if not saved_states:
-            print("No saved states to restore")
+            logger.hunk_debug("No saved states to restore")
             return True
 
         restored_count = 0
@@ -559,7 +572,7 @@ def _restore_working_dir_state(saved_states: Dict[str, str], affected_files: Set
                         # File didn't exist, remove it if it exists now
                         if os.path.exists(file_path):
                             os.remove(file_path)
-                            print(f"Removed file that shouldn't exist: {file_path}")
+                            logger.hunk_debug(f"Removed file that shouldn't exist: {file_path}")
                             restored_count += 1
                     else:
                         # CRITICAL FIX: Create directory if it doesn't exist
@@ -584,25 +597,25 @@ def _restore_working_dir_state(saved_states: Dict[str, str], affected_files: Set
                             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                                 written_content = f.read()
                             if len(written_content) != len(saved_content):
-                                print(f"Warning: File {file_path} restoration size mismatch: expected {len(saved_content)}, got {len(written_content)}")
+                                logger.warning(f"File {file_path} restoration size mismatch: expected {len(saved_content)}, got {len(written_content)}")
                         except Exception:
                             pass  # Verification failed, but file was written
                         
-                        print(f"Restored working directory state for: {file_path}")
+                        logger.hunk_debug(f"Restored working directory state for: {file_path}")
                         restored_count += 1
                 else:
-                    print(f"Warning: No saved state found for {file_path}")
+                    logger.warning(f"No saved state found for {file_path}")
                     failed_count += 1
                     
             except Exception as e:
-                print(f"Error: Could not restore {file_path}: {e}")
+                logger.error(f"Could not restore {file_path}: {e}")
                 failed_count += 1
                 # Continue with other files
 
-        print(f"Working directory restoration: {restored_count} restored, {failed_count} failed out of {len(affected_files)} files")
+        logger.hunk_debug(f"Working directory restoration: {restored_count} restored, {failed_count} failed out of {len(affected_files)} files")
         return failed_count == 0
     except Exception as e:
-        print(f"Error during working directory restoration: {e}")
+        logger.error(f"Error during working directory restoration: {e}")
         return False
 
 
@@ -644,37 +657,37 @@ def _verify_working_dir_integrity(affected_files: Set[str], patch_content: str) 
                                 
                                 # CRITICAL FIX: More robust detection
                                 if open_braces > close_braces:
-                                    print(f"Warning: File {file_path} has unmatched opening braces ({open_braces} open, {close_braces} close)")
+                                    logger.warning(f"File {file_path} has unmatched opening braces ({open_braces} open, {close_braces} close)")
                                     issues_found += 1
                                 elif not ends_properly and len(lines) > 10:
                                     # Only flag files that are substantial and don't end properly
                                     # Check if the last line looks incomplete
                                     if any(keyword in last_line.lower() for keyword in ['function', 'if', 'for', 'while', 'export', 'import', 'const', 'let', 'var']):
-                                        print(f"Warning: File {file_path} may end abruptly - last line: '{last_line}'")
+                                        logger.warning(f"File {file_path} may end abruptly - last line: '{last_line}'")
                                         issues_found += 1
                                 elif not content.endswith('\n') and '\\' not in content[-10:]:
                                     # File doesn't end with newline and no "No newline" marker nearby
-                                    print(f"Warning: File {file_path} missing trailing newline without proper marker")
+                                    logger.warning(f"File {file_path} missing trailing newline without proper marker")
                                     issues_found += 1
                     
                     # Check for completely empty files that shouldn't be empty
                     if os.path.getsize(file_path) == 0 and 'delete' not in patch_content.lower():
-                        print(f"Warning: File {file_path} is unexpectedly empty")
+                        logger.warning(f"File {file_path} is unexpectedly empty")
                         issues_found += 1
                         
             except Exception as e:
-                print(f"Warning: Could not verify integrity of {file_path}: {e}")
+                logger.warning(f"Could not verify integrity of {file_path}: {e}")
                 issues_found += 1
         
         if issues_found > 0:
-            print(f"Working directory integrity check: {issues_found} potential issues found out of {total_files} files")
+            logger.hunk_debug(f"Working directory integrity check: {issues_found} potential issues found out of {total_files} files")
             return False
         else:
-            print(f"Working directory integrity check: All {total_files} files appear valid")
+            logger.hunk_debug(f"Working directory integrity check: All {total_files} files appear valid")
             return True
             
     except Exception as e:
-        print(f"Error during working directory integrity check: {e}")
+        logger.error(f"Error during working directory integrity check: {e}")
         return False
 
 
@@ -695,14 +708,14 @@ def _relocate_and_apply_hunk(hunk: Hunk, base_diff: str) -> bool:
         patch_content = _create_valid_git_patch([hunk], base_diff)
 
         if not patch_content.strip():
-            print(f"Could not generate valid patch for hunk {hunk.id}")
+            logger.error(f"Could not generate valid patch for hunk {hunk.id}")
             return False
 
         # Apply using git's native mechanism
         return _apply_patch_with_git(patch_content)
 
     except Exception as e:
-        print(f"Error applying hunk {hunk.id}: {e}")
+        logger.error(f"Error applying hunk {hunk.id}: {e}")
         return False
 
 

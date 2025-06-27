@@ -4,6 +4,9 @@ import os
 import subprocess
 import json
 import google.generativeai as genai
+from ...logger import get_logger
+
+logger = get_logger()
 
 
 class UnifiedAIProvider:
@@ -87,10 +90,10 @@ class UnifiedAIProvider:
                 
         except ImportError:
             # Fall back to heuristic if tiktoken not available
-            print("Warning: tiktoken not available, using fallback token estimation")
+            logger.warning("tiktoken not available, using fallback token estimation")
         except Exception as e:
             # Fall back to heuristic on any tiktoken error
-            print(f"Warning: tiktoken error ({e}), using fallback token estimation")
+            logger.warning(f"tiktoken error ({e}), using fallback token estimation")
         
         # Fallback heuristic only when tiktoken fails
         # More conservative estimation for code/diffs: 1 token ≈ 3 characters
@@ -225,7 +228,7 @@ class UnifiedAIProvider:
             # Check if response was truncated
             response_text = response.get('response', '')
             if response.get('done', True) is False:
-                print(f"Warning: Response may have been truncated. Used {ollama_params['num_ctx']} context tokens.")
+                logger.warning(f"Response may have been truncated. Used {ollama_params['num_ctx']} context tokens.")
             
             # For Ollama with format parameter, response should already be the commits array
             # But if it's wrapped in an object, extract the commits
@@ -266,7 +269,7 @@ class UnifiedAIProvider:
             
             # Warn if prompt is large but manageable
             if params["prompt_tokens"] > model_context_limit * 0.7:
-                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
+                logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
             client = openai.OpenAI(api_key=api_key)
             
@@ -294,7 +297,7 @@ class UnifiedAIProvider:
             
             # Check if response was truncated
             if response.choices[0].finish_reason == "length":
-                print(f"Warning: OpenAI response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
+                logger.warning(f"OpenAI response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
             
             # Extract commits array from structured response
             content = response.choices[0].message.content
@@ -327,7 +330,7 @@ class UnifiedAIProvider:
             
             # Warn if prompt is large but manageable
             if params["prompt_tokens"] > model_context_limit * 0.8:
-                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
+                logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
             client = anthropic.Anthropic(api_key=api_key)
             
@@ -393,7 +396,7 @@ class UnifiedAIProvider:
             
             # Warn if prompt is large but manageable
             if params["prompt_tokens"] > model_context_limit * 0.8:
-                print(f"Warning: Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
+                logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
             # Create the model
             model = genai.GenerativeModel(self.config.ai.model)

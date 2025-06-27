@@ -5,6 +5,9 @@ Diff parser module for extracting individual hunks from git diff output.
 import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Set, Dict
+from .logger import get_logger
+
+logger = get_logger()
 
 
 @dataclass
@@ -78,11 +81,11 @@ def parse_diff(diff_output: str, context_lines: int = 3) -> List[Hunk]:
                                 i += 1
                                 break
                             else:
-                                print(f"Skipping suspicious 'No newline' marker after non-content line: {prev_line}")
+                                logger.debug(f"Skipping suspicious 'No newline' marker after non-content line: {prev_line}")
                                 i += 1
                                 break
                         else:
-                            print(f"Skipping 'No newline' marker in hunk with insufficient content")
+                            logger.debug(f"Skipping 'No newline' marker in hunk with insufficient content")
                             i += 1
                             break
                     else:
@@ -253,7 +256,7 @@ def _create_absolutely_minimal_patch(hunks: List[Hunk], base_diff: str) -> str:
         return result
         
     except Exception as e:
-        print(f"Minimal patch creation failed: {e}")
+        logger.error(f"Minimal patch creation failed: {e}")
         # Ultimate fallback - return empty patch rather than corrupted one
         return ""
 
@@ -852,7 +855,7 @@ def _calculate_line_number_adjustments(hunks_for_file: List[Hunk]) -> Dict[str, 
             adjustments[hunk.id] = (hunk.start_line, hunk.start_line)
         return adjustments
     
-    print(f"Warning: Detected true overlap between hunks, applying conservative adjustments...")
+    logger.warning(f"Detected true overlap between hunks, applying conservative adjustments...")
     
     # Apply minimal adjustments only when absolutely necessary
     for i, hunk in enumerate(sorted_hunks):
@@ -956,7 +959,7 @@ def _validate_patch_format(patch_content: str) -> bool:
         if line.startswith('@@') and lines.index(line) + 1 < len(lines):
             next_line = lines[lines.index(line) + 1]
             if next_line == '':
-                print(f"Warning: Empty line immediately after hunk header: {line}")
+                logger.warning(f"Empty line immediately after hunk header: {line}")
     
     return True
 
@@ -976,7 +979,7 @@ def _attempt_patch_repair(patch_content: str, hunks: List[Hunk], base_diff: str)
         Repaired patch content or None if repair failed
     """
     try:
-        print("Attempting to repair patch by regenerating from original hunks...")
+        logger.debug("Attempting to repair patch by regenerating from original hunks...")
         
         # Try to regenerate patch using simpler logic
         patch_parts = []
@@ -1025,7 +1028,7 @@ def _attempt_patch_repair(patch_content: str, hunks: List[Hunk], base_diff: str)
         return None
         
     except Exception as e:
-        print(f"Patch repair failed: {e}")
+        logger.error(f"Patch repair failed: {e}")
         return None
 
 
@@ -1279,17 +1282,17 @@ def _finalize_patch_content(patch_parts: List[str]) -> str:
                 if prev_line and len(prev_line) > 0 and prev_line[0] in ['+', '-', ' ']:
                     valid_no_newline_markers.append(i)
                 else:
-                    print(f"Warning: Suspicious 'No newline' marker at position {i} after non-content line: {prev_line}")
+                    logger.warning(f"Suspicious 'No newline' marker at position {i} after non-content line: {prev_line}")
     
     # CRITICAL FIX: Only preserve "No newline" markers that are actually valid
     if valid_no_newline_markers:
-        print(f"Preserving valid 'No newline at end of file' state (found {len(valid_no_newline_markers)} valid markers)")
+        logger.debug(f"Preserving valid 'No newline at end of file' state (found {len(valid_no_newline_markers)} valid markers)")
         # Join parts with newlines, preserving the no-newline markers
         patch_content = '\n'.join(patch_parts)
     else:
         # No valid "no newline" markers - filter out any invalid ones
         if has_no_newline_marker and not valid_no_newline_markers:
-            print(f"Filtering out {len(no_newline_positions)} invalid 'No newline' markers")
+            logger.debug(f"Filtering out {len(no_newline_positions)} invalid 'No newline' markers")
             cleaned_parts = [part for i, part in enumerate(patch_parts) 
                            if not (part.startswith('\\') and 'No newline' in part)]
             patch_content = '\n'.join(cleaned_parts)
@@ -1467,7 +1470,7 @@ def _repair_patch_conservative(patch_content: str, hunks: List[Hunk], base_diff:
                         if j > 0 and hunk_lines[j-1] and len(hunk_lines[j-1]) > 0 and hunk_lines[j-1][0] in ['+', '-', ' ']:
                             patch_parts.append(line)
                         else:
-                            print(f"Filtering out invalid 'No newline' marker during repair: {line}")
+                            logger.debug(f"Filtering out invalid 'No newline' marker during repair: {line}")
                     else:
                         patch_parts.append(line)
         
@@ -1481,5 +1484,5 @@ def _repair_patch_conservative(patch_content: str, hunks: List[Hunk], base_diff:
         return None
         
     except Exception as e:
-        print(f"Patch repair failed: {e}")
+        logger.error(f"Patch repair failed: {e}")
         return None

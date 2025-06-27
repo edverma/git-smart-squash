@@ -13,6 +13,7 @@ from .simple_config import ConfigManager
 from .ai.providers.simple_unified import UnifiedAIProvider
 from .diff_parser import parse_diff, Hunk
 from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area
+from .logger import get_logger, LogLevel
 
 
 class GitSmartSquashCLI:
@@ -22,11 +23,18 @@ class GitSmartSquashCLI:
         self.console = Console()
         self.config_manager = ConfigManager()
         self.config = None
+        self.logger = get_logger()
+        self.logger.set_console(self.console)
     
     def main(self):
         """Main entry point for the CLI."""
         parser = self.create_parser()
         args = parser.parse_args()
+        
+        # Set debug logging if requested
+        if args.debug:
+            self.logger.set_level(LogLevel.DEBUG)
+            self.logger.debug("Debug logging enabled")
         
         try:
             # Load configuration
@@ -95,6 +103,12 @@ class GitSmartSquashCLI:
             '--no-attribution',
             action='store_true',
             help='Disable the attribution message in commit messages'
+        )
+        
+        parser.add_argument(
+            '--debug',
+            action='store_true',
+            help='Enable debug logging for detailed hunk application information'
         )
         
         return parser
@@ -398,14 +412,22 @@ class GitSmartSquashCLI:
                         if hunk_ids:
                             try:
                                 # Apply hunks using the hunk applicator
+                                self.logger.debug(f"Attempting to apply {len(hunk_ids)} hunks for commit: {commit['message']}")
+                                self.logger.debug(f"Hunk IDs: {hunk_ids}")
+                                
                                 success = apply_hunks_with_fallback(hunk_ids, hunks_by_id, full_diff)
+                                
+                                self.logger.debug(f"Hunk application result: {'success' if success else 'failed'}")
                                 
                                 if success:
                                     # Check if there are actually staged changes
                                     result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
                                                           capture_output=True, text=True)
                                     
-                                    if result.stdout.strip():
+                                    staged_files = result.stdout.strip()
+                                    self.logger.debug(f"Staged files after hunk application: {staged_files if staged_files else 'NONE'}")
+                                    
+                                    if staged_files:
                                         # Add attribution to commit message if not disabled
                                         commit_message = commit['message']
                                         if not no_attribution and self.config.attribution.enabled:
@@ -431,8 +453,16 @@ class GitSmartSquashCLI:
                                         subprocess.run(['git', 'status'], capture_output=True, check=True)
                                     else:
                                         self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
+                                        self.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
+                                        self.logger.debug("This can happen when:")
+                                        self.logger.debug("  - Hunks failed to apply due to conflicts")
+                                        self.logger.debug("  - Hunks were already applied in a previous commit")
+                                        self.logger.debug("  - The patch content was invalid or empty")
+                                        self.logger.debug("Run with --debug to see detailed hunk application logs")
                                 else:
                                     self.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
+                                    self.logger.error(f"Hunk application failed for commit: {commit['message']}")
+                                    self.logger.debug(f"Failed hunk IDs: {hunk_ids}")
                                     
                             except Exception as e:
                                 self.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
