@@ -11,6 +11,9 @@ from .logger import get_logger
 
 logger = get_logger()
 
+# Global tracking of file modifications
+file_modification_history = {}
+
 
 class HunkApplicatorError(Exception):
     """Custom exception for hunk application errors."""
@@ -34,6 +37,10 @@ def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: st
     """
     if not hunk_ids:
         return True
+    
+    # Reset file modification history for this run
+    global file_modification_history
+    file_modification_history = {}
 
     # Get the hunks to apply
     hunks_to_apply = []
@@ -100,7 +107,11 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
             return False
 
         logger.hunk_debug(f"✓ Group {i+1} applied successfully")
+        # Track which files were modified by this group
+        _track_file_modifications(group)
 
+    # Show final file modification summary
+    _show_file_modification_summary()
     return True
 
 
@@ -336,6 +347,15 @@ def _apply_patch_with_git(patch_content: str) -> bool:
         
         # CRITICAL FIX: Also save the current staging state before applying patches
         original_staging_state = _save_staging_state()
+        
+        # Enhanced debug: Show file states before patch
+        _debug_file_states_before_patch(affected_files, patch_content)
+        
+        # Track which files this patch is trying to modify
+        logger.hunk_debug(f"\nPatch attempting to modify files: {', '.join(sorted(affected_files))}")
+        for file_path in affected_files:
+            if file_path in file_modification_history:
+                logger.hunk_debug(f"  {file_path} previously modified by: {', '.join(file_modification_history[file_path])}")
 
         # Create temporary patch file with enhanced validation
         with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as patch_file:
@@ -365,8 +385,9 @@ def _apply_patch_with_git(patch_content: str) -> bool:
             logger.hunk_debug(f"Attempting to apply patch from file: {patch_file_path}")
             logger.hunk_debug(f"Affected files: {affected_files}")
             
+            # Enhanced debug: Use verbose git apply to get detailed error info
             result = subprocess.run(
-                ['git', 'apply', '--index', '--whitespace=nowarn', patch_file_path],
+                ['git', 'apply', '-v', '--index', '--whitespace=nowarn', patch_file_path],
                 capture_output=True,
                 text=True,
                 cwd=os.getcwd()
@@ -374,6 +395,8 @@ def _apply_patch_with_git(patch_content: str) -> bool:
 
             if result.returncode == 0:
                 logger.hunk_debug("✓ Patch applied successfully via git apply --index")
+                # Log which files were actually modified
+                logger.hunk_debug(f"Staged files after hunk application: {', '.join(sorted(affected_files))}")
                 # CRITICAL FIX: Verify working directory matches expected state after successful apply
                 if _verify_working_dir_integrity(affected_files, patch_content):
                     return True
@@ -383,6 +406,11 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                     return True
             else:
                 logger.hunk_debug(f"Git apply --index failed: {result.stderr}")
+                logger.hunk_debug(f"Git apply return code: {result.returncode}")
+                logger.hunk_debug(f"Git apply stdout: {result.stdout}")
+                
+                # Enhanced debug: Analyze patch failure
+                _analyze_patch_failure(patch_content, affected_files, result.stderr)
                 # CRITICAL FIX: Immediately restore BOTH working directory and staging states
                 logger.hunk_debug("Restoring working directory and staging states after --index failure...")
                 _restore_working_dir_state(working_dir_state, affected_files)
@@ -390,7 +418,7 @@ def _apply_patch_with_git(patch_content: str) -> bool:
                 
                 # If --index fails, fallback to --cached and then sync working directory
                 result_cached = subprocess.run(
-                    ['git', 'apply', '--cached', '--whitespace=nowarn', patch_file_path],
+                    ['git', 'apply', '-v', '--cached', '--whitespace=nowarn', patch_file_path],
                     capture_output=True,
                     text=True,
                     cwd=os.getcwd()
@@ -784,6 +812,9 @@ def reset_staging_area():
             text=True,
             check=False
         )
+        # Also reset file modification history
+        global file_modification_history
+        file_modification_history = {}
         return result.returncode == 0
     except Exception:
         return False
@@ -858,3 +889,222 @@ def get_staging_status() -> Dict[str, List[str]]:
 
     except Exception:
         return {'staged': [], 'modified': []}
+
+
+def _debug_file_states_before_patch(affected_files: Set[str], patch_content: str):
+    """
+    Debug helper to show file states before applying patch.
+    
+    Args:
+        affected_files: Files that will be affected by the patch
+        patch_content: The patch content to be applied
+    """
+    try:
+        for file_path in affected_files:
+            logger.hunk_debug(f"\n===== FILE STATE BEFORE PATCH: {file_path} =====")
+            
+            # Show current file content with line numbers
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                
+                # Extract context from patch for this file
+                patch_lines = patch_content.split('\n')
+                in_file_section = False
+                patch_hunks = []
+                current_hunk = []
+                
+                for line in patch_lines:
+                    if line.startswith('diff --git') and f'b/{file_path}' in line:
+                        in_file_section = True
+                    elif line.startswith('diff --git') and in_file_section:
+                        break
+                    elif in_file_section and line.startswith('@@'):
+                        if current_hunk:
+                            patch_hunks.append(current_hunk)
+                        current_hunk = [line]
+                    elif in_file_section and current_hunk:
+                        current_hunk.append(line)
+                
+                if current_hunk:
+                    patch_hunks.append(current_hunk)
+                
+                # For each hunk, show the relevant file context
+                for hunk in patch_hunks:
+                    if hunk and hunk[0].startswith('@@'):
+                        # Parse hunk header
+                        import re
+                        match = re.match(r'@@ -(\d+),?\d* \+(\d+),?\d* @@', hunk[0])
+                        if match:
+                            start_line = int(match.group(1))
+                            context_start = max(0, start_line - 4)
+                            context_end = min(len(lines), start_line + 15)
+                            
+                            logger.hunk_debug(f"\nFile content around line {start_line}:")
+                            for i in range(context_start, context_end):
+                                line_num = i + 1
+                                line_content = lines[i].rstrip('\n') if i < len(lines) else ''
+                                logger.hunk_debug(f"{line_num:4d}: {line_content}")
+                            
+                            logger.hunk_debug("\nPatch expects:")
+                            for patch_line in hunk[1:11]:  # Show first 10 lines of hunk
+                                logger.hunk_debug(f"      {patch_line}")
+            else:
+                logger.hunk_debug(f"File does not exist yet: {file_path}")
+            
+            # Show git index vs working directory state
+            logger.hunk_debug(f"\n===== GIT STATE FOR {file_path} =====")
+            
+            # Check index state
+            index_result = subprocess.run(
+                ['git', 'diff', '--cached', '--', file_path],
+                capture_output=True,
+                text=True
+            )
+            if index_result.stdout:
+                logger.hunk_debug("File has staged changes:")
+                for line in index_result.stdout.split('\n')[:20]:
+                    logger.hunk_debug(f"  STAGED: {line}")
+            else:
+                logger.hunk_debug("No staged changes for this file")
+            
+            # Check working directory state
+            wd_result = subprocess.run(
+                ['git', 'diff', '--', file_path],
+                capture_output=True,
+                text=True
+            )
+            if wd_result.stdout:
+                logger.hunk_debug("File has unstaged changes:")
+                for line in wd_result.stdout.split('\n')[:20]:
+                    logger.hunk_debug(f"  UNSTAGED: {line}")
+            else:
+                logger.hunk_debug("No unstaged changes for this file")
+                
+    except Exception as e:
+        logger.error(f"Error in debug file states: {e}")
+
+
+def _analyze_patch_failure(patch_content: str, affected_files: Set[str], error_msg: str):
+    """
+    Analyze why a patch failed to apply by comparing expected vs actual content.
+    
+    Args:
+        patch_content: The patch that failed to apply
+        affected_files: Files that were supposed to be affected
+        error_msg: The error message from git apply
+    """
+    try:
+        logger.hunk_debug("\n===== PATCH FAILURE ANALYSIS =====")
+        logger.hunk_debug(f"Error message: {error_msg}")
+        
+        # Parse error to find specific line failures
+        import re
+        error_matches = re.findall(r'error: patch failed: ([^:]+):(\d+)', error_msg)
+        
+        for file_path, line_num in error_matches:
+            logger.hunk_debug(f"\nPatch failed at {file_path}:{line_num}")
+            
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                
+                line_idx = int(line_num) - 1
+                context_start = max(0, line_idx - 3)
+                context_end = min(len(lines), line_idx + 4)
+                
+                logger.hunk_debug("Actual file content:")
+                for i in range(context_start, context_end):
+                    marker = '>>>' if i == line_idx else '   '
+                    line_content = lines[i].rstrip('\n') if i < len(lines) else ''
+                    logger.hunk_debug(f"{marker} {i+1:4d}: {line_content}")
+                
+                # Extract what patch expected
+                _show_patch_expectations(patch_content, file_path, int(line_num))
+        
+        # Check for common issues
+        if "does not match index" in error_msg:
+            logger.hunk_debug("\nIssue: File in working directory differs from index")
+            logger.hunk_debug("This usually means the file was modified after staging")
+        
+        if "No such file or directory" in error_msg:
+            logger.hunk_debug("\nIssue: Patch expects a file that doesn't exist")
+        
+        if "already exists" in error_msg:
+            logger.hunk_debug("\nIssue: Patch tries to create a file that already exists")
+            
+    except Exception as e:
+        logger.error(f"Error analyzing patch failure: {e}")
+
+
+def _show_patch_expectations(patch_content: str, file_path: str, target_line: int):
+    """
+    Show what the patch expected to find at a specific line.
+    
+    Args:
+        patch_content: The full patch content
+        file_path: The file path
+        target_line: The line number where patch failed
+    """
+    try:
+        logger.hunk_debug(f"\nPatch expectations for line {target_line}:")
+        
+        lines = patch_content.split('\n')
+        in_file = False
+        current_line = 0
+        
+        for i, line in enumerate(lines):
+            if f'b/{file_path}' in line:
+                in_file = True
+            elif in_file and line.startswith('diff --git'):
+                break
+            elif in_file and line.startswith('@@'):
+                # Parse hunk header
+                import re
+                match = re.match(r'@@ -(\d+),?\d* \+\d+,?\d* @@', line)
+                if match:
+                    current_line = int(match.group(1))
+            elif in_file and current_line > 0:
+                if line.startswith(' '):
+                    # Context line
+                    if abs(current_line - target_line) <= 3:
+                        logger.hunk_debug(f"  Expected context at {current_line}: {line[1:]}")
+                    current_line += 1
+                elif line.startswith('-'):
+                    # Line to be removed
+                    if abs(current_line - target_line) <= 3:
+                        logger.hunk_debug(f"  Expected to remove at {current_line}: {line[1:]}")
+                    current_line += 1
+                elif line.startswith('+'):
+                    # Line to be added (doesn't increment current_line)
+                    if abs(current_line - target_line) <= 3:
+                        logger.hunk_debug(f"  Expected to add after {current_line}: {line[1:]}")
+                        
+    except Exception as e:
+        logger.error(f"Error showing patch expectations: {e}")
+
+
+def _track_file_modifications(hunks: List[Hunk]):
+    """
+    Track which hunks modified which files.
+    
+    Args:
+        hunks: List of hunks that were successfully applied
+    """
+    global file_modification_history
+    for hunk in hunks:
+        if hunk.file_path not in file_modification_history:
+            file_modification_history[hunk.file_path] = []
+        file_modification_history[hunk.file_path].append(hunk.id)
+        logger.hunk_debug(f"File {hunk.file_path} modified by hunk {hunk.id}")
+
+
+def _show_file_modification_summary():
+    """
+    Show summary of all file modifications.
+    """
+    global file_modification_history
+    if file_modification_history:
+        logger.hunk_debug("\n===== FILE MODIFICATION SUMMARY =====")
+        for file_path, hunk_ids in file_modification_history.items():
+            logger.hunk_debug(f"{file_path}: modified by hunks {', '.join(hunk_ids)}")
