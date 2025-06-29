@@ -4,7 +4,7 @@ import argparse
 import sys
 import subprocess
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -14,6 +14,7 @@ from .ai.providers.simple_unified import UnifiedAIProvider
 from .diff_parser import parse_diff, Hunk
 from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area
 from .logger import get_logger, LogLevel
+from .dependency_validator import DependencyValidator, ValidationResult
 
 
 class GitSmartSquashCLI:
@@ -156,6 +157,38 @@ class GitSmartSquashCLI:
                 self.console.print("[red]Failed to generate commit plan[/red]")
                 return
             
+            # Validate the commit plan respects hunk dependencies
+            validator = DependencyValidator()
+            validation_result = validator.validate_commit_plan(
+                commit_plan.get("commits", []), 
+                hunks
+            )
+            
+            if not validation_result.is_valid:
+                self.console.print("\n[yellow]Dependency violations detected. Automatically fixing...[/yellow]")
+                
+                # Show the violations for transparency
+                self.logger.debug("Dependency violations:")
+                for error in validation_result.errors:
+                    self.logger.debug(f"  • {error}")
+                
+                # Automatically fix the commit plan
+                fixed_commit_plan = self._auto_fix_dependencies(commit_plan, hunks, validator)
+                
+                if fixed_commit_plan:
+                    self.console.print("[green]✓ Successfully reorganized commits to respect dependencies[/green]")
+                    commit_plan = fixed_commit_plan
+                else:
+                    # Fallback: merge all commits into one
+                    self.console.print("[yellow]Could not resolve dependencies. Merging all changes into a single commit.[/yellow]")
+                    commit_plan = self._merge_all_commits(commit_plan, hunks)
+            
+            # Log any warnings even if validation passed
+            if validation_result.warnings:
+                self.console.print("\n[yellow]Warnings:[/yellow]")
+                for warning in validation_result.warnings:
+                    self.console.print(f"  • {warning}")
+            
             # 3. Display the plan
             self.display_commit_plan(commit_plan)
             
@@ -211,7 +244,7 @@ class GitSmartSquashCLI:
                         continue
             raise Exception(f"Could not get diff from {base_branch}: {e.stderr}")
     
-    def analyze_with_ai(self, hunks: List[Hunk], full_diff: str, custom_instructions: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+    def analyze_with_ai(self, hunks: List[Hunk], full_diff: str, custom_instructions: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Send hunks to AI and get back commit organization plan."""
         try:
             # Ensure config is loaded
@@ -226,7 +259,22 @@ class GitSmartSquashCLI:
             response = ai_provider.generate(prompt)
             
             # With structured output, response should always be valid JSON
-            return json.loads(response)
+            result = json.loads(response)
+            
+            self.logger.debug(f"AI response type: {type(result).__name__}")
+            self.logger.debug(f"AI response: {json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)}")
+            
+            # Validate the response structure
+            if not isinstance(result, dict):
+                self.console.print(f"[red]AI returned invalid response format: expected dict, got {type(result).__name__}[/red]")
+                return None
+            
+            if "commits" not in result:
+                self.console.print(f"[red]AI response missing 'commits' key[/red]")
+                self.logger.debug(f"Available keys: {list(result.keys())}")
+                return None
+            
+            return result
             
         except json.JSONDecodeError as e:
             self.console.print(f"[red]AI returned invalid JSON: {e}[/red]")
@@ -256,6 +304,11 @@ class GitSmartSquashCLI:
             ])
         
         prompt_parts.extend([
+            "CRITICAL DEPENDENCY RULES:",
+            "- Some hunks depend on others and MUST be in the same commit or the dependency must come first",
+            "- If hunk A depends on hunk B, they must either be in the same commit OR B must be in an earlier commit than A",
+            "- Pay special attention to dependencies marked below - violating them will cause the commits to fail",
+            "",
             "For each commit, provide:",
             "1. A properly formatted git commit message following these rules:",
             "   - First line: max 80 characters (type: brief description)",
@@ -286,10 +339,18 @@ class GitSmartSquashCLI:
         
         # Add each hunk with its context
         for hunk in hunks:
-            prompt_parts.extend([
+            hunk_info = [
                 f"Hunk ID: {hunk.id}",
                 f"File: {hunk.file_path}",
                 f"Lines: {hunk.start_line}-{hunk.end_line}",
+            ]
+            
+            # Add dependency information if present
+            if hunk.dependencies:
+                dep_list = ", ".join(sorted(hunk.dependencies))
+                hunk_info.append(f"[DEPENDS ON: {dep_list}] - These hunks MUST be in the same commit or come before this one")
+            
+            hunk_info.extend([
                 "",
                 "Context:",
                 hunk.context if hunk.context else f"(Context unavailable for {hunk.file_path})",
@@ -300,15 +361,18 @@ class GitSmartSquashCLI:
                 "---",
                 ""
             ])
+            
+            prompt_parts.extend(hunk_info)
         
         return "\n".join(prompt_parts)
     
     
-    def display_commit_plan(self, commit_plan: List[Dict[str, Any]]):
+    def display_commit_plan(self, commit_plan: Dict[str, Any]):
         """Display the proposed commit plan."""
         self.console.print("\n[bold]Proposed Commit Structure:[/bold]")
         
-        for i, commit in enumerate(commit_plan, 1):
+        commits = commit_plan.get("commits", [])
+        for i, commit in enumerate(commits, 1):
             panel_content = []
             panel_content.append(f"[bold]Message:[/bold] {commit['message']}")
             
@@ -356,10 +420,17 @@ class GitSmartSquashCLI:
     def get_user_confirmation(self) -> bool:
         """Get user confirmation to proceed."""
         self.console.print("\n[bold]Apply this commit structure?[/bold]")
-        response = input("Continue? (y/N): ")
-        return response.lower().strip() == 'y'
+        try:
+            response = input("Continue? (y/N): ")
+            self.logger.debug(f"User input received: '{response}'")
+            result = response.lower().strip() == 'y'
+            self.logger.debug(f"Confirmation result: {result}")
+            return result
+        except (EOFError, KeyboardInterrupt):
+            self.logger.debug("Input interrupted or EOF received")
+            return False
     
-    def apply_commit_plan(self, commit_plan: List[Dict[str, Any]], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool = False):
+    def apply_commit_plan(self, commit_plan: Dict[str, Any], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool = False):
         """Apply the commit plan using hunk-based staging."""
         try:
             with Progress(
@@ -390,12 +461,13 @@ class GitSmartSquashCLI:
                 # 4. Create new commits based on the plan
                 progress.update(task, description="Creating new commits...")
                 
-                if commit_plan:
+                commits = commit_plan.get("commits", [])
+                if commits:
                     commits_created = 0
                     all_applied_hunk_ids = set()
                     
-                    for i, commit in enumerate(commit_plan):
-                        progress.update(task, description=f"Creating commit {i+1}/{len(commit_plan)}: {commit['message'][:50]}...")
+                    for i, commit in enumerate(commits):
+                        progress.update(task, description=f"Creating commit {i+1}/{len(commits)}: {commit['message'][:50]}...")
                         
                         # Reset staging area before each commit
                         reset_staging_area()
@@ -513,6 +585,207 @@ class GitSmartSquashCLI:
         except subprocess.CalledProcessError as e:
             self.console.print(f"[red]Failed to apply commit plan: {e}[/red]")
             sys.exit(1)
+    
+    def _auto_fix_dependencies(self, commit_plan: Dict[str, Any], hunks: List[Hunk], validator: DependencyValidator) -> Optional[Dict[str, Any]]:
+        """Automatically fix dependency violations using graph analysis and minimal merging."""
+        commits = commit_plan.get("commits", [])
+        hunk_map = {hunk.id: hunk for hunk in hunks}
+        
+        # Build commit-level dependency graph
+        commit_graph = self._build_commit_dependency_graph(commits, hunk_map)
+        
+        # Find strongly connected components (groups of commits with circular dependencies)
+        sccs = self._find_strongly_connected_components(commit_graph)
+        
+        # If all commits are in one SCC, we have no choice but to merge all
+        if len(sccs) == 1 and len(sccs[0]) == len(commits):
+            self.logger.debug("All commits are circularly dependent, merging all")
+            return None
+        
+        # Create new commit list by merging SCCs
+        new_commits = self._merge_sccs(commits, sccs)
+        
+        # Topologically sort the commits to ensure dependencies are respected
+        sorted_commits = self._topological_sort_commits(new_commits, hunk_map)
+        
+        if sorted_commits is None:
+            self.logger.debug("Could not topologically sort commits, merging all")
+            return None
+        
+        # Validate the fixed plan
+        fixed_plan = {"commits": sorted_commits}
+        validation_result = validator.validate_commit_plan(sorted_commits, hunks)
+        
+        if validation_result.is_valid:
+            self.logger.debug(f"Successfully reorganized {len(commits)} commits into {len(sorted_commits)} commits")
+            return fixed_plan
+        else:
+            self.logger.debug("Fixed plan still has violations, will merge all commits")
+            return None
+    
+    def _build_commit_dependency_graph(self, commits: List[Dict], hunk_map: Dict[str, Hunk]) -> Dict[int, Set[int]]:
+        """Build a graph of dependencies between commits."""
+        graph = {i: set() for i in range(len(commits))}
+        
+        # Build hunk_id to commit_idx mapping
+        hunk_to_commit = {}
+        for idx, commit in enumerate(commits):
+            for hunk_id in commit.get("hunk_ids", []):
+                hunk_to_commit[hunk_id] = idx
+        
+        # Build commit-level dependencies
+        for idx, commit in enumerate(commits):
+            for hunk_id in commit.get("hunk_ids", []):
+                hunk = hunk_map.get(hunk_id)
+                if hunk and hunk.dependencies:
+                    for dep_id in hunk.dependencies:
+                        dep_commit_idx = hunk_to_commit.get(dep_id)
+                        if dep_commit_idx is not None and dep_commit_idx != idx:
+                            # This commit depends on the commit containing the dependency
+                            graph[idx].add(dep_commit_idx)
+        
+        return graph
+    
+    def _find_strongly_connected_components(self, graph: Dict[int, Set[int]]) -> List[List[int]]:
+        """Find strongly connected components using Tarjan's algorithm."""
+        index_counter = [0]
+        stack = []
+        lowlinks = {}
+        index = {}
+        on_stack = set()
+        sccs = []
+        
+        def strongconnect(v):
+            index[v] = index_counter[0]
+            lowlinks[v] = index_counter[0]
+            index_counter[0] += 1
+            stack.append(v)
+            on_stack.add(v)
+            
+            for w in graph.get(v, set()):
+                if w not in index:
+                    strongconnect(w)
+                    lowlinks[v] = min(lowlinks[v], lowlinks[w])
+                elif w in on_stack:
+                    lowlinks[v] = min(lowlinks[v], index[w])
+            
+            if lowlinks[v] == index[v]:
+                scc = []
+                while True:
+                    w = stack.pop()
+                    on_stack.remove(w)
+                    scc.append(w)
+                    if w == v:
+                        break
+                sccs.append(scc)
+        
+        for v in graph:
+            if v not in index:
+                strongconnect(v)
+        
+        return sccs
+    
+    def _merge_sccs(self, commits: List[Dict], sccs: List[List[int]]) -> List[Dict]:
+        """Merge commits within each strongly connected component."""
+        # Map each commit index to its SCC
+        commit_to_scc = {}
+        for scc_idx, scc in enumerate(sccs):
+            for commit_idx in scc:
+                commit_to_scc[commit_idx] = scc_idx
+        
+        # Create merged commits for each SCC
+        merged_commits = []
+        for scc in sccs:
+            if len(scc) == 1:
+                # Single commit SCC, no merge needed
+                merged_commits.append(commits[scc[0]])
+            else:
+                # Merge multiple commits
+                merged_hunk_ids = []
+                merged_messages = []
+                merged_rationales = []
+                
+                for idx in sorted(scc):
+                    commit = commits[idx]
+                    merged_hunk_ids.extend(commit.get("hunk_ids", []))
+                    merged_messages.append(commit.get("message", ""))
+                    merged_rationales.append(commit.get("rationale", ""))
+                
+                # Create a more descriptive message for merged commits
+                primary_message = merged_messages[0] if merged_messages else "Merged changes"
+                if len(scc) > 2:
+                    additional_info = f" (+{len(scc)-1} related changes)"
+                else:
+                    additional_info = ""
+                
+                merged_commit = {
+                    "message": primary_message + additional_info + "\n\n" + "\n".join(f"- {msg}" for msg in merged_messages[1:] if msg),
+                    "hunk_ids": merged_hunk_ids,
+                    "rationale": "Merged due to circular dependencies: " + "; ".join(merged_rationales)
+                }
+                merged_commits.append(merged_commit)
+        
+        return merged_commits
+    
+    def _topological_sort_commits(self, commits: List[Dict], hunk_map: Dict[str, Hunk]) -> Optional[List[Dict]]:
+        """Topologically sort commits based on their dependencies."""
+        # Rebuild the dependency graph for the new commits
+        graph = self._build_commit_dependency_graph(commits, hunk_map)
+        
+        # For topological sort, we need to reverse the graph
+        # If commit A depends on commit B, then B should come before A
+        reversed_graph = {i: set() for i in range(len(commits))}
+        for node in graph:
+            for dep in graph[node]:
+                reversed_graph[dep].add(node)
+        
+        # Kahn's algorithm for topological sort on reversed graph
+        in_degree = {i: 0 for i in range(len(commits))}
+        for node in reversed_graph:
+            for neighbor in reversed_graph[node]:
+                in_degree[neighbor] += 1
+        
+        queue = [node for node in in_degree if in_degree[node] == 0]
+        sorted_indices = []
+        
+        while queue:
+            node = queue.pop(0)
+            sorted_indices.append(node)
+            
+            for neighbor in reversed_graph.get(node, set()):
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+        
+        # If we couldn't sort all commits, there's still a cycle
+        if len(sorted_indices) != len(commits):
+            return None
+        
+        # Return commits in sorted order
+        return [commits[i] for i in sorted_indices]
+    
+    def _merge_all_commits(self, commit_plan: Dict[str, Any], hunks: List[Hunk]) -> Dict[str, Any]:
+        """Merge all commits into a single commit as a fallback."""
+        commits = commit_plan.get("commits", [])
+        
+        # Collect all hunk IDs
+        all_hunk_ids = []
+        all_messages = []
+        
+        for commit in commits:
+            all_hunk_ids.extend(commit.get("hunk_ids", []))
+            message = commit.get("message", "")
+            if message:
+                all_messages.append(message)
+        
+        # Create single merged commit
+        merged_commit = {
+            "message": "Consolidated changes\n\n" + "\n\n".join(f"- {msg}" for msg in all_messages),
+            "hunk_ids": all_hunk_ids,
+            "rationale": "All changes merged into single commit due to complex dependencies"
+        }
+        
+        return {"commits": [merged_commit]}
 
 
 def main():
