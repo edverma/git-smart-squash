@@ -359,9 +359,9 @@ class UnifiedAIProvider:
             # Extract structured data from tool use
             for content in response.content:
                 if content.type == "tool_use" and content.name == "commit_organizer":
-                    # Extract commits array from the structured response
+                    # Return the full structured response, not just the commits array
                     structured_data = content.input
-                    return json.dumps(structured_data.get("commits", []))
+                    return json.dumps(structured_data)
             
             # Fallback if no tool use found
             if response.content and response.content[0].type == "text":

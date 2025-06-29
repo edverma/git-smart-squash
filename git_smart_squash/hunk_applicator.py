@@ -5,7 +5,12 @@ Hunk applicator module for applying specific hunks to the git staging area.
 import os
 import subprocess
 import tempfile
-from typing import List, Dict, Optional, Tuple, Set
+import difflib
+import concurrent.futures
+import threading
+import re
+from typing import List, Dict, Optional, Tuple, Set, NamedTuple
+from dataclasses import dataclass
 from .diff_parser import Hunk, validate_hunk_combination, create_dependency_groups
 from .logger import get_logger
 
@@ -14,10 +19,195 @@ logger = get_logger()
 # Global tracking of file modifications
 file_modification_history = {}
 
+# Thread-safe locks for parallel processing
+file_locks = {}  # Lock per file to prevent concurrent modifications
+staging_lock = threading.Lock()  # Global lock for staging area operations
+
 
 class HunkApplicatorError(Exception):
     """Custom exception for hunk application errors."""
     pass
+
+
+@dataclass
+class ConflictPrediction:
+    """Represents a predicted conflict for a hunk."""
+    hunk_id: str
+    likelihood: float  # 0.0 to 1.0
+    reason: str
+    suggested_action: str
+    
+
+@dataclass 
+class ContextMatch:
+    """Represents a context match location."""
+    line_number: int
+    similarity: float
+    offset: int
+
+
+def predict_conflicts(hunks: List[Hunk]) -> List[ConflictPrediction]:
+    """
+    Predict potential conflicts before attempting to apply hunks.
+    
+    Args:
+        hunks: List of hunks to analyze
+        
+    Returns:
+        List of conflict predictions
+    """
+    predictions = []
+    
+    for hunk in hunks:
+        try:
+            prediction = _predict_single_hunk_conflict(hunk)
+            if prediction:
+                predictions.append(prediction)
+        except Exception as e:
+            logger.warning(f"Could not predict conflicts for hunk {hunk.id}: {e}")
+    
+    return predictions
+
+
+def _predict_single_hunk_conflict(hunk: Hunk) -> Optional[ConflictPrediction]:
+    """
+    Predict conflicts for a single hunk by analyzing current file state.
+    
+    Args:
+        hunk: The hunk to analyze
+        
+    Returns:
+        ConflictPrediction if likely conflict, None otherwise
+    """
+    try:
+        # If file doesn't exist but hunk expects it to
+        if not os.path.exists(hunk.file_path):
+            if not _is_file_creation_hunk(hunk):
+                return ConflictPrediction(
+                    hunk_id=hunk.id,
+                    likelihood=1.0,
+                    reason=f"File {hunk.file_path} does not exist",
+                    suggested_action="Check if file was renamed or deleted"
+                )
+            return None
+        
+        # Read current file content
+        with open(hunk.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            current_content = f.read()
+        
+        current_lines = current_content.splitlines()
+        
+        # Extract expected context from hunk
+        expected_context = _extract_hunk_context(hunk)
+        if not expected_context:
+            # No context to check
+            return None
+        
+        # Get actual context at expected location
+        actual_context = _get_actual_context(current_lines, hunk.start_line - 1, len(expected_context))
+        
+        # Calculate similarity
+        similarity = _calculate_context_similarity(expected_context, actual_context)
+        
+        # Predict conflict based on similarity
+        if similarity < 0.5:
+            # Very low similarity - high conflict likelihood
+            return ConflictPrediction(
+                hunk_id=hunk.id,
+                likelihood=1.0 - similarity,
+                reason=f"Context mismatch at line {hunk.start_line} (similarity: {similarity:.2f})",
+                suggested_action="File has changed significantly - may need to regenerate diff"
+            )
+        elif similarity < 0.8:
+            # Moderate similarity - possible conflict
+            return ConflictPrediction(
+                hunk_id=hunk.id,
+                likelihood=1.0 - similarity,
+                reason=f"Partial context mismatch at line {hunk.start_line} (similarity: {similarity:.2f})",
+                suggested_action="Lines may have shifted - will try smart context adjustment"
+            )
+        
+        # High similarity - unlikely to conflict
+        return None
+        
+    except Exception as e:
+        logger.debug(f"Error predicting conflict for hunk {hunk.id}: {e}")
+        return None
+
+
+def _is_file_creation_hunk(hunk: Hunk) -> bool:
+    """Check if hunk creates a new file."""
+    lines = hunk.content.splitlines()
+    return any(line.startswith('--- /dev/null') for line in lines)
+
+
+def _extract_hunk_context(hunk: Hunk) -> List[str]:
+    """
+    Extract context lines from a hunk.
+    
+    Args:
+        hunk: The hunk to extract context from
+        
+    Returns:
+        List of context lines (without prefixes)
+    """
+    context_lines = []
+    lines = hunk.content.splitlines()
+    
+    for line in lines[1:]:  # Skip header
+        if line.startswith(' '):
+            # Context line
+            context_lines.append(line[1:])
+        elif not line or (not line.startswith('+') and not line.startswith('-')):
+            # Empty line is also context
+            context_lines.append('')
+    
+    return context_lines
+
+
+def _get_actual_context(lines: List[str], start_idx: int, context_size: int) -> List[str]:
+    """
+    Get actual context from file lines.
+    
+    Args:
+        lines: All lines in the file
+        start_idx: Starting index
+        context_size: Number of context lines to extract
+        
+    Returns:
+        List of actual context lines
+    """
+    actual_context = []
+    
+    for i in range(context_size):
+        idx = start_idx + i
+        if 0 <= idx < len(lines):
+            actual_context.append(lines[idx])
+        else:
+            actual_context.append('')  # Out of bounds
+    
+    return actual_context
+
+
+def _calculate_context_similarity(expected: List[str], actual: List[str]) -> float:
+    """
+    Calculate similarity between expected and actual context.
+    
+    Args:
+        expected: Expected context lines
+        actual: Actual context lines
+        
+    Returns:
+        Similarity score between 0.0 and 1.0
+    """
+    if not expected and not actual:
+        return 1.0
+    if not expected or not actual:
+        return 0.0
+    
+    # Use SequenceMatcher for similarity
+    matcher = difflib.SequenceMatcher(None, expected, actual)
+    return matcher.ratio()
 
 
 def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: str) -> bool:
@@ -54,8 +244,152 @@ def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: st
     if not is_valid:
         raise HunkApplicatorError(f"Invalid hunk combination: {error_msg}")
 
+    # Predict conflicts before attempting application
+    conflict_predictions = predict_conflicts(hunks_to_apply)
+    if conflict_predictions:
+        logger.hunk_debug(f"\nConflict predictions for {len(conflict_predictions)} hunks:")
+        for pred in conflict_predictions:
+            logger.hunk_debug(f"  - {pred.hunk_id}: {pred.reason} (likelihood: {pred.likelihood:.1%})")
+            logger.hunk_debug(f"    Suggestion: {pred.suggested_action}")
+    
     # Use dependency-aware application for better handling of complex changes
     return _apply_hunks_with_dependencies(hunks_to_apply, base_diff)
+
+
+def smart_adjust_hunk_context(hunk: Hunk, max_offset: int = 50) -> Optional[Hunk]:
+    """
+    Use fuzzy matching to find the best location for a hunk when line numbers have shifted.
+    
+    Args:
+        hunk: The hunk to adjust
+        max_offset: Maximum lines to search up/down from original position
+        
+    Returns:
+        Adjusted hunk with new line numbers, or None if no good match found
+    """
+    try:
+        if not os.path.exists(hunk.file_path):
+            return None
+        
+        # Read current file content
+        with open(hunk.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            file_content = f.read()
+        
+        file_lines = file_content.splitlines()
+        
+        # Extract context lines from hunk
+        context_lines = _extract_hunk_context(hunk)
+        if not context_lines:
+            # No context to match
+            return hunk
+        
+        # Find best match using fuzzy matching
+        best_match = _find_best_context_match(file_lines, context_lines, hunk.start_line - 1, max_offset)
+        
+        if best_match and best_match.similarity > 0.9:
+            # Found a good match at different location
+            if best_match.offset != 0:
+                logger.hunk_debug(f"Adjusting hunk {hunk.id} by {best_match.offset} lines (similarity: {best_match.similarity:.2f})")
+                return _adjust_hunk_lines(hunk, best_match.offset)
+        
+        return hunk
+        
+    except Exception as e:
+        logger.error(f"Error adjusting hunk context: {e}")
+        return hunk
+
+
+def _find_best_context_match(file_lines: List[str], context_lines: List[str], 
+                            original_line: int, max_offset: int) -> Optional[ContextMatch]:
+    """
+    Find the best matching location for context lines in the file.
+    
+    Args:
+        file_lines: All lines in the file
+        context_lines: Context lines to match
+        original_line: Original line number (0-based)
+        max_offset: Maximum offset to search
+        
+    Returns:
+        Best context match or None
+    """
+    best_match = None
+    best_similarity = 0.0
+    
+    # Search range around original location
+    search_start = max(0, original_line - max_offset)
+    search_end = min(len(file_lines), original_line + max_offset)
+    
+    for i in range(search_start, search_end):
+        # Extract actual context at this position
+        actual_context = file_lines[i:i+len(context_lines)]
+        
+        if len(actual_context) < len(context_lines):
+            # Not enough lines at this position
+            continue
+        
+        # Calculate similarity
+        similarity = _calculate_context_similarity(context_lines, actual_context)
+        
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_match = ContextMatch(
+                line_number=i + 1,  # 1-based
+                similarity=similarity,
+                offset=i - original_line
+            )
+    
+    return best_match
+
+
+def _adjust_hunk_lines(hunk: Hunk, offset: int) -> Hunk:
+    """
+    Adjust hunk line numbers by the given offset.
+    
+    Args:
+        hunk: Original hunk
+        offset: Line offset to apply
+        
+    Returns:
+        New hunk with adjusted line numbers
+    """
+    # Parse hunk header and adjust line numbers
+    lines = hunk.content.splitlines()
+    if not lines or not lines[0].startswith('@@'):
+        return hunk
+    
+    # Parse header: @@ -start,count +start,count @@
+    header_match = re.match(r'@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@(.*)', lines[0])
+    if not header_match:
+        return hunk
+    
+    old_start = int(header_match.group(1))
+    old_count = int(header_match.group(2)) if header_match.group(2) else 1
+    new_start = int(header_match.group(3))
+    new_count = int(header_match.group(4)) if header_match.group(4) else 1
+    context = header_match.group(5)
+    
+    # Apply offset
+    adjusted_old_start = old_start + offset
+    adjusted_new_start = new_start + offset
+    
+    # Reconstruct header
+    new_header = f"@@ -{adjusted_old_start},{old_count} +{adjusted_new_start},{new_count} @@{context}"
+    
+    # Create new hunk with adjusted content
+    new_content = '\n'.join([new_header] + lines[1:])
+    
+    return Hunk(
+        id=hunk.id,
+        file_path=hunk.file_path,
+        start_line=hunk.start_line + offset,
+        end_line=hunk.end_line + offset,
+        content=new_content,
+        context=hunk.context,
+        change_type=hunk.change_type,
+        dependencies=hunk.dependencies,
+        dependents=hunk.dependents
+    )
 
 
 def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
@@ -69,8 +403,17 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     Returns:
         True if all hunks applied successfully, False otherwise
     """
-    # Create dependency groups
-    dependency_groups = create_dependency_groups(hunks)
+    # Identify independent hunk groups for parallel processing
+    independent_groups = _identify_independent_hunk_groups(hunks)
+    
+    if len(independent_groups) > 1:
+        logger.hunk_debug(f"Identified {len(independent_groups)} independent groups for parallel processing")
+        # Apply independent groups in parallel
+        return _apply_independent_groups_parallel(independent_groups, base_diff)
+    else:
+        # Fall back to sequential dependency-based processing
+        # Create dependency groups
+        dependency_groups = create_dependency_groups(hunks)
 
     logger.hunk_debug(f"Dependency analysis: {len(dependency_groups)} groups identified")
     for i, group in enumerate(dependency_groups):
@@ -90,15 +433,19 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
 
         if len(group) == 1:
             # Single hunk - apply individually for better error isolation
-            success = _apply_hunks_sequentially(group, base_diff)
+            # Try smart context adjustment if conflict predicted
+            adjusted_group = _try_smart_context_adjustment(group)
+            success = _apply_hunks_sequentially(adjusted_group, base_diff)
         else:
             # Multiple interdependent hunks - try atomic application first
             success = _apply_dependency_group_atomically(group, base_diff)
 
             if not success:
                 logger.hunk_debug("  Atomic application failed, trying sequential with smart ordering...")
+                # Try smart context adjustment before sequential application
+                adjusted_group = _try_smart_context_adjustment(group)
                 # Fallback to sequential application with dependency ordering
-                success = _apply_dependency_group_sequentially(group, base_diff)
+                success = _apply_dependency_group_sequentially(adjusted_group, base_diff)
 
         if not success:
             logger.error(f"Failed to apply group {i+1}, restoring staging state...")
@@ -113,6 +460,215 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     # Show final file modification summary
     _show_file_modification_summary()
     return True
+
+
+def _try_smart_context_adjustment(hunks: List[Hunk]) -> List[Hunk]:
+    """
+    Try to apply smart context adjustment to hunks that might have conflicts.
+    
+    Args:
+        hunks: Original hunks
+        
+    Returns:
+        List of potentially adjusted hunks
+    """
+    adjusted_hunks = []
+    
+    for hunk in hunks:
+        # Check if this hunk is likely to have conflicts
+        predictions = predict_conflicts([hunk])
+        
+        if predictions and predictions[0].likelihood > 0.5:
+            logger.hunk_debug(f"Attempting smart context adjustment for hunk {hunk.id} (conflict likelihood: {predictions[0].likelihood:.1%})")
+            adjusted = smart_adjust_hunk_context(hunk)
+            if adjusted and adjusted.start_line != hunk.start_line:
+                logger.hunk_debug(f"✓ Successfully adjusted hunk {hunk.id} to new position")
+                adjusted_hunks.append(adjusted)
+            else:
+                adjusted_hunks.append(hunk)
+        else:
+            adjusted_hunks.append(hunk)
+    
+    return adjusted_hunks
+
+
+def _identify_independent_hunk_groups(hunks: List[Hunk]) -> List[List[Hunk]]:
+    """
+    Identify groups of hunks that can be applied independently in parallel.
+    
+    Args:
+        hunks: List of all hunks
+        
+    Returns:
+        List of independent hunk groups
+    """
+    # Build a graph of dependencies
+    hunk_map = {hunk.id: hunk for hunk in hunks}
+    
+    # Group hunks by file first - different files can be processed in parallel
+    file_groups = {}
+    for hunk in hunks:
+        if hunk.file_path not in file_groups:
+            file_groups[hunk.file_path] = []
+        file_groups[hunk.file_path].append(hunk)
+    
+    # Check for cross-file dependencies
+    independent_groups = []
+    processed_hunks = set()
+    
+    for file_path, file_hunks in file_groups.items():
+        # Check if any hunk in this file depends on hunks in other files
+        has_external_deps = False
+        for hunk in file_hunks:
+            for dep_id in hunk.dependencies:
+                if dep_id in hunk_map and hunk_map[dep_id].file_path != file_path:
+                    has_external_deps = True
+                    break
+            if has_external_deps:
+                break
+        
+        if not has_external_deps:
+            # This file's hunks are independent of other files
+            independent_groups.append(file_hunks)
+            processed_hunks.update(h.id for h in file_hunks)
+    
+    # Handle remaining hunks with cross-file dependencies
+    remaining_hunks = [h for h in hunks if h.id not in processed_hunks]
+    if remaining_hunks:
+        # These need to be processed together
+        independent_groups.append(remaining_hunks)
+    
+    return independent_groups
+
+
+def _apply_independent_groups_parallel(groups: List[List[Hunk]], base_diff: str, max_workers: int = 4) -> bool:
+    """
+    Apply independent hunk groups in parallel for better performance.
+    
+    Args:
+        groups: List of independent hunk groups
+        base_diff: Original full diff output
+        max_workers: Maximum number of parallel workers
+        
+    Returns:
+        True if all groups applied successfully
+    """
+    logger.hunk_debug(f"Applying {len(groups)} independent groups in parallel (max workers: {max_workers})")
+    
+    # Use ThreadPoolExecutor for I/O-bound git operations
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers, len(groups))) as executor:
+        # Submit all groups for parallel processing
+        future_to_group = {
+            executor.submit(_apply_group_thread_safe, group, base_diff, i): (i, group)
+            for i, group in enumerate(groups)
+        }
+        
+        success_count = 0
+        failed_groups = []
+        
+        # Process results as they complete
+        for future in concurrent.futures.as_completed(future_to_group):
+            group_idx, group = future_to_group[future]
+            try:
+                success = future.result()
+                if success:
+                    success_count += 1
+                    logger.hunk_debug(f"✓ Group {group_idx + 1} applied successfully in parallel")
+                else:
+                    failed_groups.append((group_idx, group))
+                    logger.error(f"✗ Group {group_idx + 1} failed in parallel processing")
+            except Exception as e:
+                failed_groups.append((group_idx, group))
+                logger.error(f"Exception in parallel processing of group {group_idx + 1}: {e}")
+        
+        # If any groups failed, try them sequentially as fallback
+        if failed_groups:
+            logger.hunk_debug(f"\nRetrying {len(failed_groups)} failed groups sequentially...")
+            for group_idx, group in failed_groups:
+                logger.hunk_debug(f"Retrying group {group_idx + 1} sequentially...")
+                success = _apply_hunks_with_dependencies(group, base_diff)
+                if success:
+                    success_count += 1
+                    logger.hunk_debug(f"✓ Group {group_idx + 1} succeeded on sequential retry")
+                else:
+                    logger.error(f"✗ Group {group_idx + 1} failed even with sequential retry")
+        
+        return success_count == len(groups)
+
+
+def _apply_group_thread_safe(hunks: List[Hunk], base_diff: str, group_idx: int) -> bool:
+    """
+    Apply a group of hunks in a thread-safe manner.
+    
+    Args:
+        hunks: Hunks to apply
+        base_diff: Original full diff  
+        group_idx: Index of this group for logging
+        
+    Returns:
+        True if successful
+    """
+    try:
+        # Get file locks for all files this group will modify
+        file_paths = list(set(h.file_path for h in hunks))
+        locks_acquired = []
+        
+        # Acquire locks in sorted order to prevent deadlocks
+        for file_path in sorted(file_paths):
+            if file_path not in file_locks:
+                file_locks[file_path] = threading.Lock()
+            
+            if file_locks[file_path].acquire(timeout=30):
+                locks_acquired.append(file_path)
+            else:
+                logger.error(f"Could not acquire lock for {file_path} within timeout")
+                # Release any locks we acquired
+                for path in locks_acquired:
+                    file_locks[path].release()
+                return False
+        
+        try:
+            # Apply hunks with file locks held
+            logger.hunk_debug(f"Thread processing group {group_idx + 1} with locks on: {', '.join(file_paths)}")
+            
+            # Use regular dependency-based application
+            dependency_groups = create_dependency_groups(hunks)
+            
+            for i, group in enumerate(dependency_groups):
+                # Save staging state with thread-safe lock
+                with staging_lock:
+                    group_staging_state = _save_staging_state()
+                
+                if len(group) == 1:
+                    # Try smart adjustment for single hunks
+                    adjusted_group = _try_smart_context_adjustment(group)
+                    success = _apply_hunks_sequentially(adjusted_group, base_diff)
+                else:
+                    success = _apply_dependency_group_atomically(group, base_diff)
+                    if not success:
+                        # Try smart adjustment before sequential
+                        adjusted_group = _try_smart_context_adjustment(group)
+                        success = _apply_dependency_group_sequentially(adjusted_group, base_diff)
+                
+                if not success:
+                    # Restore staging state with lock
+                    with staging_lock:
+                        _restore_staging_state(group_staging_state)
+                    return False
+                
+                # Track modifications
+                _track_file_modifications(group)
+            
+            return True
+            
+        finally:
+            # Always release locks
+            for path in locks_acquired:
+                file_locks[path].release()
+                
+    except Exception as e:
+        logger.error(f"Error in thread-safe group application: {e}")
+        return False
 
 
 def _apply_dependency_group_atomically(hunks: List[Hunk], base_diff: str) -> bool:
