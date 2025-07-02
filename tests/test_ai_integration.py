@@ -83,7 +83,7 @@ class TestAllProvidersTokenLimits(unittest.TestCase):
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
 
     def _get_available_providers(self):
@@ -187,7 +187,7 @@ class TestAllProvidersRealResponses(unittest.TestCase):
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
 
     def _get_available_providers(self):
@@ -578,7 +578,7 @@ class TestAllProvidersIntegrationWithCLI(unittest.TestCase):
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
 
     def _get_available_providers(self):
@@ -766,7 +766,7 @@ class TestStructuredOutputValidation(unittest.TestCase):
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
+            'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
 
     def _get_available_providers(self):
@@ -1007,7 +1007,7 @@ class TestConcurrentProviderOperations(unittest.TestCase):
             'local': UnifiedAIProvider(Config(ai=AIConfig(provider='local'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)),
             'openai': UnifiedAIProvider(Config(ai=AIConfig(provider='openai'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)),
             'anthropic': UnifiedAIProvider(Config(ai=AIConfig(provider='anthropic'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)),
-            'gemini': UnifiedAIProvider(Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro-preview-06-05'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False))
+            'gemini': UnifiedAIProvider(Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False))
         }
 
     def test_provider_isolation(self):

@@ -1446,7 +1446,7 @@ class TestConfigurationManagement(unittest.TestCase):
             ('local', 'devstral'),
             ('openai', 'gpt-4.1'),
             ('anthropic', 'claude-sonnet-4-20250514'),
-            ('gemini', 'gemini-2.5-pro-preview-06-05'),
+            ('gemini', 'gemini-2.5-pro'),
             ('unknown', 'devstral')  # fallback
         ]
 

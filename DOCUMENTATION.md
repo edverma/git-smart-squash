@@ -249,7 +249,7 @@ export GEMINI_API_KEY="..."
 ```
 
 **Models:**
-- `gemini-2.5-pro-preview-06-05` (default) - Gemini 2.5 Pro, latest model
+- `gemini-2.5-pro` (default) - Gemini 2.5 Pro, latest model
 - `gemini-2.0-flash-exp` - Faster, lighter model
 - `gemini-1.5-pro` - Previous generation
 - Any other Gemini model - Specify with `--model` flag
