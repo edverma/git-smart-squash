@@ -230,14 +230,16 @@ class UnifiedAIProvider:
             if response.get('done', True) is False:
                 logger.warning(f"Response may have been truncated. Used {ollama_params['num_ctx']} context tokens.")
             
-            # For Ollama with format parameter, response should already be the commits array
-            # But if it's wrapped in an object, extract the commits
+            # Parse and ensure correct format
             try:
                 parsed = json.loads(response_text)
                 if isinstance(parsed, dict) and "commits" in parsed:
-                    return json.dumps(parsed["commits"])
+                    return json.dumps(parsed)  # Return full dict
+                elif isinstance(parsed, list):
+                    # Wrap list in expected format
+                    return json.dumps({"commits": parsed})
                 else:
-                    return response_text  # Already in array format
+                    return response_text
             except json.JSONDecodeError:
                 return response_text  # Return as-is if not JSON
             
@@ -299,10 +301,9 @@ class UnifiedAIProvider:
             if response.choices[0].finish_reason == "length":
                 logger.warning(f"OpenAI response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
             
-            # Extract commits array from structured response
+            # Return the full structured response
             content = response.choices[0].message.content
-            parsed = json.loads(content)
-            return json.dumps(parsed.get("commits", []))
+            return content  # OpenAI already returns the correct format with json_schema
             
         except ImportError:
             raise Exception("OpenAI library not installed. Run: pip install openai")
@@ -359,9 +360,9 @@ class UnifiedAIProvider:
             # Extract structured data from tool use
             for content in response.content:
                 if content.type == "tool_use" and content.name == "commit_organizer":
-                    # Extract commits array from the structured response
+                    # Return the full structured response, not just the commits array
                     structured_data = content.input
-                    return json.dumps(structured_data.get("commits", []))
+                    return json.dumps(structured_data)
             
             # Fallback if no tool use found
             if response.content and response.content[0].type == "text":
@@ -442,13 +443,16 @@ class UnifiedAIProvider:
             except Exception as e:
                 raise Exception(f"Failed to extract text from Gemini response: {e}. Finish reason: {response.candidates[0].finish_reason}")
             
-            # Parse the JSON response to extract commits array
+            # Parse the JSON response and return the full structure
             try:
                 parsed = json.loads(response_text)
                 if isinstance(parsed, dict) and "commits" in parsed:
-                    return json.dumps(parsed["commits"])
+                    return json.dumps(parsed)  # Return full dict
+                elif isinstance(parsed, list):
+                    # Wrap list in expected format
+                    return json.dumps({"commits": parsed})
                 else:
-                    return response_text  # Already in array format
+                    return response_text
             except json.JSONDecodeError:
                 return response_text  # Return as-is if not JSON
             

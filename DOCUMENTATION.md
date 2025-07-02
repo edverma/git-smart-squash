@@ -249,7 +249,7 @@ export GEMINI_API_KEY="..."
 ```
 
 **Models:**
-- `gemini-2.5-pro-preview-06-05` (default) - Gemini 2.5 Pro, latest model
+- `gemini-2.5-pro` (default) - Gemini 2.5 Pro, latest model
 - `gemini-2.0-flash-exp` - Faster, lighter model
 - `gemini-1.5-pro` - Previous generation
 - Any other Gemini model - Specify with `--model` flag
@@ -274,19 +274,19 @@ ai:
   provider: local  # or openai, anthropic, gemini
   model: devstral  # optional, uses provider default if not set
                    # You can specify ANY model supported by the provider
-  
+
   # Provider-specific settings
   local:
     base_url: http://localhost:11434  # Ollama server URL
     timeout: 600  # Request timeout in seconds
-  
+
   openai:
     api_key: ${OPENAI_API_KEY}  # Can reference environment variables
     organization: org-...  # Optional organization ID
-  
+
   anthropic:
     api_key: ${ANTHROPIC_API_KEY}
-  
+
   gemini:
     api_key: ${GEMINI_API_KEY}
 
@@ -294,12 +294,12 @@ ai:
 git:
   default_base: main  # Default base branch
   backup_branch: true  # Create backup branches
-  
+
 # Output Settings
 output:
   color: true  # Use colored output
   verbose: false  # Show detailed progress
-  
+
 # Custom Instructions
 instructions: |
   Always group database migrations separately.
@@ -353,9 +353,9 @@ auto_apply: false  # Set to true to apply commits without confirmation
    - Adds attribution to each commit (unless disabled):
      ```
      feat: implement new feature
-     
+
      Detailed description of the changes...
-     
+
      ----
      Made with git-smart-squash
      https://github.com/edverma/git-smart-squash
@@ -409,7 +409,7 @@ git-smart-squash -i "Follow our team's commit guidelines: feat/fix/chore prefixe
 # Complex organization
 git-smart-squash -i "
 1. Group all database schema changes together
-2. Separate API endpoint additions from modifications  
+2. Separate API endpoint additions from modifications
 3. Keep test files with their implementation
 4. Documentation updates in final commit
 "
