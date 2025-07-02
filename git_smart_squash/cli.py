@@ -49,84 +49,84 @@ class GitSmartSquashCLI:
                     self.config.ai.model = self.config_manager._get_default_model(args.ai_provider)
             if args.model:
                 self.config.ai.model = args.model
-            
+
             # Run the simplified smart squash
             self.run_smart_squash(args)
-                
+
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
             sys.exit(1)
-    
+
     def create_parser(self) -> argparse.ArgumentParser:
         """Create the simplified argument parser."""
         parser = argparse.ArgumentParser(
             prog='git-smart-squash',
             description='AI-powered git commit reorganization for clean PR reviews'
         )
-        
+
         parser.add_argument(
             '--base',
             default='main',
             help='Base branch to compare against (default: main)'
         )
-        
-        
+
+
         parser.add_argument(
             '--ai-provider',
             choices=['openai', 'anthropic', 'local', 'gemini'],
             help='AI provider to use'
         )
-        
+
         parser.add_argument(
             '--model',
             help='AI model to use'
         )
-        
+
         parser.add_argument(
             '--config',
             help='Path to configuration file'
         )
-        
+
         parser.add_argument(
             '--auto-apply',
             action='store_true',
             help='Apply the commit plan immediately without confirmation'
         )
-        
-        
+
+
         parser.add_argument(
             '--instructions', '-i',
             type=str,
             help='Custom instructions for AI to follow when organizing commits (e.g., "Group by feature area", "Separate tests from implementation")'
         )
-        
+
         parser.add_argument(
             '--no-attribution',
             action='store_true',
             help='Disable the attribution message in commit messages'
         )
-        
+
         parser.add_argument(
             '--debug',
             action='store_true',
             help='Enable debug logging for detailed hunk application information'
         )
-        
+
         return parser
-    
+
     def run_smart_squash(self, args):
         """Run the simplified smart squash operation."""
         try:
             # Ensure config is loaded
             if self.config is None:
                 self.config = self.config_manager.load_config()
-            
+
             # 1. Get the full diff between base branch and current branch
             full_diff = self.get_full_diff(args.base)
             if not full_diff:
                 self.console.print("[yellow]No changes found to reorganize[/yellow]")
                 return
-            
+
             # 2. Parse diff into individual hunks
             with Progress(
                 SpinnerColumn(),
@@ -193,29 +193,29 @@ class GitSmartSquashCLI:
                 self.apply_commit_plan(commit_plan, hunks, full_diff, args.base, args.no_attribution)
             else:
                 self.console.print("Operation cancelled.")
-                    
+
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
             sys.exit(1)
-    
+
     def get_full_diff(self, base_branch: str) -> Optional[str]:
         """Get the full diff between base branch and current branch."""
         try:
             # First check if we're in a git repo and the base branch exists
-            subprocess.run(['git', 'rev-parse', '--git-dir'], 
+            subprocess.run(['git', 'rev-parse', '--git-dir'],
                          check=True, capture_output=True)
-            
+
             # Try to get the diff
             result = subprocess.run(
                 ['git', 'diff', f'{base_branch}...HEAD'],
                 capture_output=True, text=True, check=True
             )
-            
+
             if not result.stdout.strip():
                 return None
-                
+
             return result.stdout
-            
+
         except subprocess.CalledProcessError as e:
             if 'unknown revision' in e.stderr:
                 # Try with origin/main or other common base branches
@@ -282,7 +282,7 @@ class GitSmartSquashCLI:
             "multiple files if they implement the same feature or fix.",
             "",
         ]
-        
+
         # Add custom instructions if provided
         if custom_instructions:
             prompt_parts.extend([
@@ -290,7 +290,7 @@ class GitSmartSquashCLI:
                 custom_instructions,
                 "",
             ])
-        
+
         prompt_parts.extend([
             "For each commit, provide:",
             "1. A properly formatted git commit message following these rules:",
@@ -376,7 +376,7 @@ class GitSmartSquashCLI:
                         if 'unknown' not in hunks_by_file:
                             hunks_by_file['unknown'] = []
                         hunks_by_file['unknown'].append(hunk_id)
-                
+
                 panel_content.append("[bold]Hunks:[/bold]")
                 for file_path, file_hunks in hunks_by_file.items():
                     hunk_descriptions = []
@@ -490,7 +490,7 @@ class GitSmartSquashCLI:
                                             full_message = commit_message + attribution
                                         else:
                                             full_message = commit_message
-                                        
+
                                         # Create the commit
                                         subprocess.run([
                                             'git', 'commit', '-m', full_message
@@ -498,11 +498,11 @@ class GitSmartSquashCLI:
                                         commits_created += 1
                                         all_applied_hunk_ids.update(hunk_ids)
                                         self.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
-                                        
+
                                         # Update working directory to match the commit
                                         # This ensures files reflect the committed state
                                         subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-                                        
+
                                         # Additional sync to ensure working directory is fully updated
                                         # Force git to refresh the working directory state
                                         subprocess.run(['git', 'status'], capture_output=True, check=True)
@@ -518,23 +518,23 @@ class GitSmartSquashCLI:
                                     self.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
                                     self.logger.error(f"Hunk application failed for commit: {commit['message']}")
                                     self.logger.debug(f"Failed hunk IDs: {hunk_ids}")
-                                    
+
                             except Exception as e:
                                 self.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
                         else:
                             self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]")
-                    
+
                     # 5. Check for remaining hunks that weren't included in any commit
                     remaining_hunk_ids = [hunk.id for hunk in hunks if hunk.id not in all_applied_hunk_ids]
-                    
+
                     if remaining_hunk_ids:
                         progress.update(task, description="Creating final commit for remaining changes...")
                         reset_staging_area()
-                        
+
                         try:
                             success = apply_hunks_with_fallback(remaining_hunk_ids, hunks_by_id, full_diff)
                             if success:
-                                result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
+                                result = subprocess.run(['git', 'diff', '--cached', '--name-only'],
                                                       capture_output=True, text=True)
                                 if result.stdout.strip():
                                     # Add attribution to commit message if not disabled
@@ -543,28 +543,28 @@ class GitSmartSquashCLI:
                                         full_message = 'chore: remaining uncommitted changes' + attribution
                                     else:
                                         full_message = 'chore: remaining uncommitted changes'
-                                    
+
                                     subprocess.run([
                                         'git', 'commit', '-m', full_message
                                     ], check=True)
                                     commits_created += 1
                                     self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
-                                    
+
                                     # Update working directory to match the commit
                                     subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-                                    
+
                                     # Additional sync to ensure working directory is fully updated
                                     # Force git to refresh the working directory state
                                     subprocess.run(['git', 'status'], capture_output=True, check=True)
                         except Exception as e:
                             self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
-                    
+
                     # Working directory is now kept in sync after each commit,
                     # so no need for a final reset
-                    
+
                     self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
                     self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")
-                
+
         except subprocess.CalledProcessError as e:
             self.console.print(f"[red]Failed to apply commit plan: {e}[/red]")
             sys.exit(1)

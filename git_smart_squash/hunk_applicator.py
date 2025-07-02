@@ -20,6 +20,7 @@ class HunkApplicatorError(Exception):
     pass
 
 
+
 def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: str) -> bool:
     """
     Apply specific hunks to the git staging area using dependency-aware grouping.
@@ -58,6 +59,7 @@ def apply_hunks(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: st
     return _apply_hunks_with_dependencies(hunks_to_apply, base_diff)
 
 
+
 def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     """
     Apply hunks using dependency-aware grouping for better handling of complex changes.
@@ -69,16 +71,16 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     Returns:
         True if all hunks applied successfully, False otherwise
     """
-    # Create dependency groups
+    # Create dependency groups for sequential processing
     dependency_groups = create_dependency_groups(hunks)
 
-    logger.hunk_debug(f"Dependency analysis: {len(dependency_groups)} groups identified")
+    logger.debug(f"Dependency analysis: {len(dependency_groups)} groups identified")
     for i, group in enumerate(dependency_groups):
-        logger.hunk_debug(f"  Group {i+1}: {len(group)} hunks")
+        logger.debug(f"  Group {i+1}: {len(group)} hunks")
         for hunk in group:
             deps = len(hunk.dependencies)
             dependents = len(hunk.dependents)
-            logger.hunk_debug(f"    - {hunk.id} ({hunk.change_type}, deps: {deps}, dependents: {dependents})")
+            logger.debug(f"    - {hunk.id} ({hunk.change_type}, deps: {deps}, dependents: {dependents})")
 
     # Apply groups in order
     for i, group in enumerate(dependency_groups):
@@ -113,6 +115,8 @@ def _apply_hunks_with_dependencies(hunks: List[Hunk], base_diff: str) -> bool:
     # Show final file modification summary
     _show_file_modification_summary()
     return True
+
+
 
 
 def _apply_dependency_group_atomically(hunks: List[Hunk], base_diff: str) -> bool:
