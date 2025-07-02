@@ -416,40 +416,27 @@ def analyze_hunk_change_type(hunk_content: str, file_path: str) -> str:
 def analyze_hunk_dependencies(hunks: List[Hunk]) -> None:
     """
     Analyze dependencies between hunks to enable intelligent grouping.
-    
+
     Args:
         hunks: List of hunks to analyze (modified in place)
     """
     # Build maps for quick lookups
     hunks_by_file = {}
     import_export_map = {}
-    
+
     for hunk in hunks:
         if hunk.file_path not in hunks_by_file:
             hunks_by_file[hunk.file_path] = []
         hunks_by_file[hunk.file_path].append(hunk)
-        
+
         # Extract import/export information
         if hunk.change_type in ["import", "export"]:
             imports, exports = extract_import_export_info(hunk.content)
             import_export_map[hunk.id] = {"imports": imports, "exports": exports}
-    
+
     # Analyze dependencies
     for hunk in hunks:
-        # 1. Import/Export dependencies
-        if hunk.id in import_export_map:
-            hunk_info = import_export_map[hunk.id]
-            
-            # Find dependencies based on what this hunk imports
-            for imported_module in hunk_info["imports"]:
-                for other_hunk in hunks:
-                    if other_hunk.id != hunk.id and other_hunk.id in import_export_map:
-                        other_info = import_export_map[other_hunk.id]
-                        if imported_module in other_info["exports"]:
-                            hunk.dependencies.add(other_hunk.id)
-                            other_hunk.dependents.add(hunk.id)
-        
-        # 2. Line number dependencies (hunks that affect each other's line numbers)
+        # 1. Line number dependencies (hunks that affect each other's line numbers)
         for other_hunk in hunks_by_file.get(hunk.file_path, []):
             if other_hunk.id != hunk.id:
                 # Check if this hunk's line numbers depend on the other hunk
@@ -458,8 +445,8 @@ def analyze_hunk_dependencies(hunks: List[Hunk]) -> None:
                         # This hunk depends on the earlier hunk
                         hunk.dependencies.add(other_hunk.id)
                         other_hunk.dependents.add(hunk.id)
-        
-        # 3. Same file proximity dependencies (changes in the same file that are close together)
+
+        # 2. Same file proximity dependencies (changes in the same file that are close together)
         for other_hunk in hunks_by_file.get(hunk.file_path, []):
             if other_hunk.id != hunk.id:
                 # If hunks are very close (within 10 lines), they might be related
@@ -469,76 +456,65 @@ def analyze_hunk_dependencies(hunks: List[Hunk]) -> None:
                     if hunk.start_line > other_hunk.start_line:
                         hunk.dependencies.add(other_hunk.id)
                         other_hunk.dependents.add(hunk.id)
-        
-        # 4. Component usage dependencies (for frontend frameworks)
-        if _is_frontend_file(hunk.file_path):
-            component_deps = find_component_dependencies(hunk, hunks)
-            for dep_id in component_deps:
-                hunk.dependencies.add(dep_id)
-                # Find the dependent hunk and update its dependents
-                for other_hunk in hunks:
-                    if other_hunk.id == dep_id:
-                        other_hunk.dependents.add(hunk.id)
-                        break
 
 
 def extract_import_export_info(hunk_content: str) -> Tuple[Set[str], Set[str]]:
     """
     Extract import and export information from hunk content.
-    
+
     Args:
         hunk_content: The hunk content to analyze
-        
+
     Returns:
         Tuple of (imports, exports) as sets of module names
     """
     imports = set()
     exports = set()
-    
+
     lines = hunk_content.split('\n')
-    
+
     for line in lines:
         if not line.startswith('+'):
             continue
-            
+
         line = line[1:].strip()  # Remove + prefix
-        
+
         # Extract imports
         import_match = re.search(r'import\s+.*from\s+[\'"]([^\'"]+)[\'"]', line)
         if import_match:
             imports.add(import_match.group(1))
-        
+
         import_match = re.search(r'import\s+[\'"]([^\'"]+)[\'"]', line)
         if import_match:
             imports.add(import_match.group(1))
-        
+
         require_match = re.search(r'require\s*\([\'"]([^\'"]+)[\'"]\)', line)
         if require_match:
             imports.add(require_match.group(1))
-        
+
         # Extract exports
         if 'export' in line:
             exports.add("__exported__")  # Simplified for now
-    
+
     return imports, exports
 
 
 def find_component_dependencies(hunk: Hunk, all_hunks: List[Hunk]) -> Set[str]:
     """
     Find component-related dependencies for frontend frameworks.
-    
+
     Args:
         hunk: The hunk to analyze
         all_hunks: All hunks to search for dependencies
-        
+
     Returns:
         Set of hunk IDs that this hunk depends on
     """
     dependencies = set()
-    
+
     # Extract component names from the hunk content
     component_names = extract_component_names(hunk.content)
-    
+
     # Look for hunks that define these components
     for other_hunk in all_hunks:
         if other_hunk.id != hunk.id:
@@ -546,35 +522,35 @@ def find_component_dependencies(hunk: Hunk, all_hunks: List[Hunk]) -> Set[str]:
                 if component_name in other_hunk.content:
                     dependencies.add(other_hunk.id)
                     break
-    
+
     return dependencies
 
 
 def extract_component_names(content: str) -> Set[str]:
     """
     Extract component names from content (simplified for now).
-    
+
     Args:
         content: The content to analyze
-        
+
     Returns:
         Set of component names found
     """
     component_names = set()
-    
+
     # Simple patterns for common frontend frameworks
     patterns = [
         r'<(\w+)[^>]*>',           # HTML/JSX tags
         r'import\s+(\w+)\s+from',  # Import statements
         r'component\s*:\s*(\w+)',  # Vue component definitions
     ]
-    
+
     for pattern in patterns:
         matches = re.findall(pattern, content)
         for match in matches:
             if match and match[0].isupper():  # Component names typically start with uppercase
                 component_names.add(match)
-    
+
     return component_names
 
 
