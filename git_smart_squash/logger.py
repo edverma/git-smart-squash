@@ -92,10 +92,12 @@ class GitSmartSquashLogger:
         """Log patch content for debugging."""
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug("[dim]===== PATCH CONTENT =====[/dim]")
-            for line in patch_content.split('\n')[:50]:  # Limit to first 50 lines
+            lines = patch_content.split('\n')
+            for line in lines[:50]:  # Limit to first 50 lines
                 self.logger.debug(f"[dim]{line}[/dim]")
-            if len(patch_content.split('\n')) > 50:
-                self.logger.debug(f"[dim]... ({len(patch_content.split('\n')) - 50} more lines)[/dim]")
+            if len(lines) > 50:
+                remaining_lines = len(lines) - 50
+                self.logger.debug(f"[dim]... ({remaining_lines} more lines)[/dim]")
             self.logger.debug("[dim]========================[/dim]")
 
 
