@@ -480,11 +480,14 @@ def _save_staging_state() -> Optional[str]:
     """
     try:
         # Get current staged diff
+        # Set environment to prevent line wrapping in git output
+        env = {**os.environ, 'GIT_PAGER': 'cat', 'COLUMNS': '999999'}
         result = subprocess.run(
-            ['git', 'diff', '--cached'],
+            ['git', '-c', 'core.pager=', 'diff', '--no-textconv', '--cached'],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            env=env
         )
         return result.stdout
     except:
@@ -960,10 +963,13 @@ def _debug_file_states_before_patch(affected_files: Set[str], patch_content: str
             logger.hunk_debug(f"\n===== GIT STATE FOR {file_path} =====")
             
             # Check index state
+            # Set environment to prevent line wrapping in git output
+            env = {**os.environ, 'GIT_PAGER': 'cat', 'COLUMNS': '999999'}
             index_result = subprocess.run(
-                ['git', 'diff', '--cached', '--', file_path],
+                ['git', '-c', 'core.pager=', 'diff', '--no-textconv', '--cached', '--', file_path],
                 capture_output=True,
-                text=True
+                text=True,
+                env=env
             )
             if index_result.stdout:
                 logger.hunk_debug("File has staged changes:")
@@ -974,9 +980,10 @@ def _debug_file_states_before_patch(affected_files: Set[str], patch_content: str
             
             # Check working directory state
             wd_result = subprocess.run(
-                ['git', 'diff', '--', file_path],
+                ['git', '-c', 'core.pager=', 'diff', '--no-textconv', '--', file_path],
                 capture_output=True,
-                text=True
+                text=True,
+                env=env
             )
             if wd_result.stdout:
                 logger.hunk_debug("File has unstaged changes:")

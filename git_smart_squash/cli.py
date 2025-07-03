@@ -4,6 +4,7 @@ import argparse
 import sys
 import subprocess
 import json
+import os
 from typing import List, Dict, Any, Optional, Set
 from rich.console import Console
 from rich.panel import Panel
@@ -206,9 +207,11 @@ class GitSmartSquashCLI:
                          check=True, capture_output=True)
 
             # Try to get the diff
+            # Set environment to prevent line wrapping in git output
+            env = {**os.environ, 'GIT_PAGER': 'cat', 'COLUMNS': '999999'}
             result = subprocess.run(
-                ['git', 'diff', f'{base_branch}...HEAD'],
-                capture_output=True, text=True, check=True
+                ['git', '-c', 'core.pager=', 'diff', '--no-textconv', f'{base_branch}...HEAD'],
+                capture_output=True, text=True, check=True, env=env
             )
 
             if not result.stdout.strip():
@@ -222,8 +225,8 @@ class GitSmartSquashCLI:
                 for alt_base in [f'origin/{base_branch}', 'develop', 'origin/develop']:
                     try:
                         result = subprocess.run(
-                            ['git', 'diff', f'{alt_base}...HEAD'],
-                            capture_output=True, text=True, check=True
+                            ['git', '-c', 'core.pager=', 'diff', '--no-textconv', f'{alt_base}...HEAD'],
+                            capture_output=True, text=True, check=True, env=env
                         )
                         if result.stdout.strip():
                             self.console.print(f"[yellow]Using {alt_base} as base branch[/yellow]")
