@@ -72,7 +72,9 @@ Thumbs.db
 
 # Project specific
 git-smart-squash-script.sh
-backup_*
+backup_*/
+backup_*.txt
+backup_*.log
 .git-smart-squash.yml
 .git-smart-squash.yaml
 
