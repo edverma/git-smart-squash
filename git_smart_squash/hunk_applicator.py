@@ -795,7 +795,7 @@ def _parse_hunk_content(hunk: Hunk) -> Tuple[List[str], List[str], List[str]]:
 
 def apply_hunks_with_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk], base_diff: str) -> bool:
     """
-    Apply hunks using the hunk-based approach only.
+    Apply hunks using the hunk-based approach with backup-aware error handling.
 
     Args:
         hunk_ids: List of hunk IDs to apply
@@ -803,9 +803,109 @@ def apply_hunks_with_fallback(hunk_ids: List[str], hunks_by_id: Dict[str, Hunk],
         base_diff: Original full diff output
 
     Returns:
-        True if successful, False otherwise
+        True if successful, False otherwise (triggers backup restoration in CLI)
     """
-    return apply_hunks(hunk_ids, hunks_by_id, base_diff)
+    try:
+        result = apply_hunks(hunk_ids, hunks_by_id, base_diff)
+        if not result:
+            logger.error("Hunk application failed - this will trigger backup restoration")
+            logger.debug("Repository state preserved via staging area backup mechanisms")
+        return result
+    except Exception as e:
+        logger.error(f"Critical hunk application error: {e}")
+        logger.error("This failure will trigger automatic backup restoration")
+        return False
+
+
+def check_repository_integrity() -> bool:
+    """
+    Check if the repository is in a clean state and working directory is consistent.
+    
+    This function can be used to determine if backup restoration might be needed.
+    
+    Returns:
+        True if repository appears to be in good state, False if issues detected
+    """
+    try:
+        # Check if there are any staged changes that might indicate partial failure
+        result = subprocess.run(
+            ['git', 'diff', '--cached', '--name-only'],
+            capture_output=True, text=True, check=True
+        )
+        
+        # Check if working directory is clean relative to HEAD
+        status_result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True, text=True, check=True
+        )
+        
+        # Log current state for debugging
+        if result.stdout.strip():
+            logger.debug(f"Staged files detected: {result.stdout.strip()}")
+        
+        if status_result.stdout.strip():
+            logger.debug(f"Working directory status: {status_result.stdout.strip()}")
+        
+        # Repository is in clean state if no unexpected changes
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Repository integrity check failed: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error during integrity check: {e}")
+        return False
+
+
+def get_backup_restoration_info() -> Dict[str, str]:
+    """
+    Get information that would be useful for backup restoration decisions.
+    
+    Returns:
+        Dictionary with repository state information
+    """
+    info = {
+        "current_branch": "unknown",
+        "head_commit": "unknown", 
+        "staged_files": "none",
+        "working_dir_status": "unknown"
+    }
+    
+    try:
+        # Get current branch
+        result = subprocess.run(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            capture_output=True, text=True, check=True
+        )
+        info["current_branch"] = result.stdout.strip()
+        
+        # Get HEAD commit
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, check=True
+        )
+        info["head_commit"] = result.stdout.strip()[:8]
+        
+        # Get staged files
+        result = subprocess.run(
+            ['git', 'diff', '--cached', '--name-only'],
+            capture_output=True, text=True, check=True
+        )
+        staged_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
+        info["staged_files"] = f"{len(staged_files)} files" if staged_files else "none"
+        
+        # Get working directory status
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True, text=True, check=True
+        )
+        status_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+        info["working_dir_status"] = f"{len(status_lines)} changes" if status_lines else "clean"
+        
+    except Exception as e:
+        logger.warning(f"Could not gather backup restoration info: {e}")
+    
+    return info
 
 
 

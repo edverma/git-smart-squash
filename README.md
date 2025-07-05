@@ -93,16 +93,48 @@ gss  # Same as git-smart-squash
 Don't worry - Git Smart Squash is designed to be safe:
 
 - **Dry run by default** - always shows you the plan first
-- **Always creates a backup branch** before making changes
+- **Requires clean working directory** - protects uncommitted changes
+- **Automatic backup creation** - creates a backup branch before any changes
+- **Automatic restoration on failure** - restores your branch if anything goes wrong
 - **Never pushes automatically** - you stay in control
-- **Easy recovery** - your original commits are always saved
+- **Easy recovery** - backup branches are preserved for manual recovery
 
-### If You Need to Undo
+### Working Directory Requirements
+
+Git Smart Squash requires a clean working directory to operate safely. If you have uncommitted changes, you'll see helpful instructions:
 
 ```bash
-# Your original branch is always backed up
-git branch | grep backup  # Find your backup
+# For staged files:
+git commit -m "Your message"  # Commit them, or
+git reset HEAD               # Unstage them
+
+# For modified files:
+git add . && git commit      # Commit them, or
+git stash                    # Temporarily save them
+
+# For untracked files:
+git add . && git commit      # Add and commit them, or
+# Add to .gitignore if they should be ignored
+```
+
+### Automatic Backup System
+
+Every time you run git-smart-squash, it automatically:
+1. Creates a backup branch with timestamp (e.g., `feature-branch-backup-1704067200`)
+2. Preserves this backup even after successful operations
+3. Automatically restores from backup if anything fails
+
+### Recovery Options
+
+```bash
+# Find your backups
+git branch | grep backup
+
+# Restore from a specific backup
 git reset --hard your-branch-backup-[timestamp]
+
+# Delete old backups when no longer needed
+git branch -D your-branch-backup-[timestamp]
 ```
 
 ## AI Provider Options

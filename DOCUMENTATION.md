@@ -328,27 +328,34 @@ auto_apply: false  # Set to true to apply commits without confirmation
 
 ### The Process
 
-1. **Diff Extraction**
+1. **Working Directory Validation**
+   - Checks for uncommitted changes (staged, unstaged, untracked)
+   - Provides helpful instructions if working directory is not clean
+   - Ensures no data loss from uncommitted work
+
+2. **Diff Extraction**
    - Calculates complete diff: `git diff BASE...HEAD`
    - Includes all changes between base branch and current HEAD
    - Preserves file paths, hunks, and context
 
-2. **AI Analysis**
+3. **AI Analysis**
    - Sends diff to selected AI provider
    - AI analyzes code changes for logical groupings
    - Considers file relationships, functionality, and dependencies
    - Generates commit plan with messages and file groupings
 
-3. **Plan Presentation**
+4. **Plan Presentation**
    - Displays proposed commit structure
    - Shows which files belong to each commit
    - Provides rationale for each grouping
    - Waits for user confirmation (unless `--auto-apply` used or configured)
 
-4. **History Rewriting**
-   - Creates backup branch: `original-branch-backup-TIMESTAMP`
-   - Soft resets to base branch: `git reset --soft BASE`
-   - Applies commits according to AI plan
+5. **Backup and History Rewriting**
+   - Creates persistent backup branch: `original-branch-backup-TIMESTAMP`
+   - Final working directory check before applying changes
+   - Hard resets to base branch: `git reset --hard BASE`
+   - Applies commits according to AI plan using hunk-based staging
+   - If any error occurs, automatically restores from backup
    - Preserves all changes, only reorganizes history
    - Adds attribution to each commit (unless disabled):
      ```
@@ -363,10 +370,23 @@ auto_apply: false  # Set to true to apply commits without confirmation
 
 ### Safety Mechanisms
 
-- **Backup Branches**: Always created before any changes
-- **Clean Working Directory Check**: Ensures no uncommitted changes
-- **Diff Validation**: Verifies changes exist before proceeding
-- **Atomic Operations**: All-or-nothing approach to prevent partial application
+Git Smart Squash is designed with multiple layers of safety:
+
+#### 1. Working Directory Protection
+- **Pre-operation validation**: Checks for uncommitted changes before starting
+- **Clear error messages**: Provides specific instructions for handling different types of changes
+- **Final validation**: Double-checks working directory is still clean before applying changes
+
+#### 2. Automatic Backup System
+- **Automatic backup creation**: Creates timestamped backup branch before any changes
+- **Persistent backups**: Backup branches are preserved even after successful operations
+- **Automatic restoration**: If any error occurs, automatically restores from backup
+- **Easy manual recovery**: Clear instructions for manual restoration if needed
+
+#### 3. Operation Safety
+- **Diff validation**: Verifies changes exist before proceeding
+- **Atomic operations**: All-or-nothing approach to prevent partial application
+- **No automatic pushing**: Changes stay local until you explicitly push
 
 ## Advanced Usage
 
@@ -476,6 +496,43 @@ git-smart-squash -i "Use conventional commit format: type(scope): description"
 
 ### Common Issues and Solutions
 
+#### "Working directory has uncommitted changes"
+
+**Problem**: Git Smart Squash requires a clean working directory
+**Solutions**:
+
+For staged files:
+```bash
+# Option 1: Commit them
+git commit -m "Your commit message"
+
+# Option 2: Unstage them
+git reset HEAD
+```
+
+For modified files:
+```bash
+# Option 1: Commit them
+git add . && git commit -m "Your commit message"
+
+# Option 2: Stash them temporarily
+git stash
+# Run git-smart-squash
+git stash pop  # After completion
+```
+
+For untracked files:
+```bash
+# Option 1: Add and commit them
+git add . && git commit -m "Add new files"
+
+# Option 2: Add to .gitignore
+echo "filename" >> .gitignore
+
+# Option 3: Remove them (careful!)
+rm filename
+```
+
 #### "Ollama server not running"
 
 **Problem**: Can't connect to local AI
@@ -548,20 +605,34 @@ source ~/.bashrc
    git-smart-squash --model gpt-4o-mini
    ```
 
-#### "Merge conflicts after applying"
+#### "Operation failed - automatic restoration"
 
-**Problem**: Backup branch has conflicts with reorganized commits
-**Recovery**:
+**Problem**: Something went wrong during commit reorganization
+**What happens**: Git Smart Squash automatically restores from backup
+**What you see**:
+```
+❌ Operation failed: [error message]
+🔄 Repository automatically restored from backup: feature-branch-backup-1234567890
+📦 Backup branch preserved for investigation: feature-branch-backup-1234567890
+```
+
+**Manual recovery** (if needed):
 ```bash
-# Find backup branch
+# Find all backup branches
 git branch | grep backup
 
-# Reset to backup
+# Restore from specific backup
 git reset --hard your-branch-backup-1234567890
 
-# Try different organization
-git-smart-squash -i "Minimize file conflicts between commits"
+# Delete backup when done (optional)
+git branch -D your-branch-backup-1234567890
 ```
+
+**Next steps**:
+- Review the error message
+- Check if working directory was clean
+- Try with different options or custom instructions
+- Report persistent issues on GitHub
 
 ### Debug Mode
 
