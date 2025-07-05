@@ -16,6 +16,7 @@ from .diff_parser import parse_diff, Hunk
 from .hunk_applicator import apply_hunks_with_fallback, reset_staging_area
 from .logger import get_logger, LogLevel
 from .dependency_validator import DependencyValidator, ValidationResult
+from .strategies.backup_manager import BackupManager
 
 
 class GitSmartSquashCLI:
@@ -122,6 +123,16 @@ class GitSmartSquashCLI:
             if self.config is None:
                 self.config = self.config_manager.load_config()
 
+            # 0. Check working directory is clean before any operations
+            self.console.print("[dim]Checking working directory status...[/dim]")
+            status_info = self._check_working_directory_clean()
+            
+            if not status_info['is_clean']:
+                self._display_working_directory_help(status_info)
+                return
+            
+            self.console.print("[green]✓ Working directory is clean[/green]")
+
             # 1. Get the full diff between base branch and current branch
             full_diff = self.get_full_diff(args.base)
             if not full_diff:
@@ -181,7 +192,16 @@ class GitSmartSquashCLI:
             # 3. Display the plan
             self.display_commit_plan(commit_plan)
 
-            # 4. Ask for confirmation (unless auto-applying)
+            # 4. Double-check working directory is still clean before applying changes
+            self.console.print("[dim]Final working directory check before applying changes...[/dim]")
+            final_status_info = self._check_working_directory_clean()
+            
+            if not final_status_info['is_clean']:
+                self.console.print("[red]❌ Working directory changed during operation![/red]")
+                self._display_working_directory_help(final_status_info)
+                return
+
+            # 5. Ask for confirmation (unless auto-applying)
             # Auto-apply if --auto-apply flag is provided or if config says to auto-apply
             auto_apply_from_config = getattr(self.config, 'auto_apply', False)
             if args.auto_apply or auto_apply_from_config:
@@ -417,160 +437,301 @@ class GitSmartSquashCLI:
             return False
 
     def apply_commit_plan(self, commit_plan: Dict[str, Any], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool = False):
-        """Apply the commit plan using hunk-based staging."""
+        """Apply the commit plan using hunk-based staging with automatic backup."""
+        backup_manager = BackupManager()
+        
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=self.console
-            ) as progress:
-                # 1. Create backup branch
-                task = progress.add_task("Creating backup...", total=None)
-                current_branch = subprocess.run(
-                    ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                    capture_output=True, text=True, check=True
-                ).stdout.strip()
-
-                backup_branch = f"{current_branch}-backup-{int(__import__('time').time())}"
-                subprocess.run(['git', 'branch', backup_branch], check=True)
-                self.console.print(f"[green]Created backup branch: {backup_branch}[/green]")
-
-                # 2. Create hunk ID to Hunk object mapping
-                hunks_by_id = {hunk.id: hunk for hunk in hunks}
-
-                # 3. Reset to base branch
-                progress.update(task, description="Resetting to base branch...")
-                # Use --hard reset to ensure working directory is clean
-                # This is safe because we've already created a backup branch
-                subprocess.run(['git', 'reset', '--hard', base_branch], check=True)
-
-                # 4. Create new commits based on the plan
-                progress.update(task, description="Creating new commits...")
-
-                commits = commit_plan.get("commits", [])
-                if commits:
-                    commits_created = 0
-                    all_applied_hunk_ids = set()
-
-                    for i, commit in enumerate(commits):
-                        progress.update(task, description=f"Creating commit {i+1}/{len(commits)}: {commit['message'][:50]}...")
-
-                        # Reset staging area before each commit
-                        reset_staging_area()
-
-                        # Get hunk IDs for this commit
-                        hunk_ids = commit.get('hunk_ids', [])
-
-                        # Backward compatibility: handle old format with files
-                        if not hunk_ids and commit.get('files'):
-                            # Convert files to hunk IDs by finding hunks that belong to those files
-                            file_paths = commit.get('files', [])
-                            hunk_ids = [hunk.id for hunk in hunks if hunk.file_path in file_paths]
-
-                        if hunk_ids:
-                            try:
-                                # Apply hunks using the hunk applicator
-                                self.logger.debug(f"Attempting to apply {len(hunk_ids)} hunks for commit: {commit['message']}")
-                                self.logger.debug(f"Hunk IDs: {hunk_ids}")
-
-                                success = apply_hunks_with_fallback(hunk_ids, hunks_by_id, full_diff)
-
-                                self.logger.debug(f"Hunk application result: {'success' if success else 'failed'}")
-
-                                if success:
-                                    # Check if there are actually staged changes
-                                    result = subprocess.run(['git', 'diff', '--cached', '--name-only'],
-                                                          capture_output=True, text=True)
-
-                                    staged_files = result.stdout.strip()
-                                    self.logger.debug(f"Staged files after hunk application: {staged_files if staged_files else 'NONE'}")
-
-                                    if staged_files:
-                                        # Add attribution to commit message if not disabled
-                                        commit_message = commit['message']
-                                        if not no_attribution and self.config.attribution.enabled:
-                                            attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
-                                            full_message = commit_message + attribution
-                                        else:
-                                            full_message = commit_message
-
-                                        # Create the commit
-                                        subprocess.run([
-                                            'git', 'commit', '-m', full_message
-                                        ], check=True)
-                                        commits_created += 1
-                                        all_applied_hunk_ids.update(hunk_ids)
-                                        self.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
-
-                                        # Update working directory to match the commit
-                                        # This ensures files reflect the committed state
-                                        subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-
-                                        # Additional sync to ensure working directory is fully updated
-                                        # Force git to refresh the working directory state
-                                        subprocess.run(['git', 'status'], capture_output=True, check=True)
-                                    else:
-                                        self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
-                                        self.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
-                                        self.logger.debug("This can happen when:")
-                                        self.logger.debug("  - Hunks failed to apply due to conflicts")
-                                        self.logger.debug("  - Hunks were already applied in a previous commit")
-                                        self.logger.debug("  - The patch content was invalid or empty")
-                                        self.logger.debug("Run with --debug to see detailed hunk application logs")
-                                else:
-                                    self.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
-                                    self.logger.error(f"Hunk application failed for commit: {commit['message']}")
-                                    self.logger.debug(f"Failed hunk IDs: {hunk_ids}")
-
-                            except Exception as e:
-                                self.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
-                        else:
-                            self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]")
-
-                    # 5. Check for remaining hunks that weren't included in any commit
-                    remaining_hunk_ids = [hunk.id for hunk in hunks if hunk.id not in all_applied_hunk_ids]
-
-                    if remaining_hunk_ids:
-                        progress.update(task, description="Creating final commit for remaining changes...")
-                        reset_staging_area()
-
-                        try:
-                            success = apply_hunks_with_fallback(remaining_hunk_ids, hunks_by_id, full_diff)
-                            if success:
-                                result = subprocess.run(['git', 'diff', '--cached', '--name-only'],
-                                                      capture_output=True, text=True)
-                                if result.stdout.strip():
-                                    # Add attribution to commit message if not disabled
-                                    if not no_attribution and self.config.attribution.enabled:
-                                        attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
-                                        full_message = 'chore: remaining uncommitted changes' + attribution
-                                    else:
-                                        full_message = 'chore: remaining uncommitted changes'
-
-                                    subprocess.run([
-                                        'git', 'commit', '-m', full_message
-                                    ], check=True)
-                                    commits_created += 1
-                                    self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
-
-                                    # Update working directory to match the commit
-                                    subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-
-                                    # Additional sync to ensure working directory is fully updated
-                                    # Force git to refresh the working directory state
-                                    subprocess.run(['git', 'status'], capture_output=True, check=True)
-                        except Exception as e:
-                            self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
-
-                    # Working directory is now kept in sync after each commit,
-                    # so no need for a final reset
-
-                    self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
-                    self.console.print(f"[blue]Backup available at: {backup_branch}[/blue]")
-
-        except subprocess.CalledProcessError as e:
-            self.console.print(f"[red]Failed to apply commit plan: {e}[/red]")
+            with backup_manager.backup_context(prefix="git-smart-squash") as backup_branch:
+                self.console.print(f"[green]📦 Created backup branch: {backup_branch}[/green]")
+                self.console.print(f"[dim]   Your current state is safely backed up before applying changes.[/dim]")
+                
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=self.console
+                ) as progress:
+                    self._apply_commits_with_backup(
+                        commit_plan, hunks, full_diff, base_branch, 
+                        no_attribution, progress, backup_branch
+                    )
+                
+                # Success - inform user backup is preserved with helpful info
+                self.console.print(f"[green]✓ Operation completed successfully![/green]")
+                self.console.print(f"[blue]📦 Backup branch created and preserved: {backup_branch}[/blue]")
+                self.console.print(f"[dim]   This backup contains your original state before changes were applied.[/dim]")
+                self.console.print(f"[dim]   You can restore it with: git reset --hard {backup_branch}[/dim]")
+                self.console.print(f"[dim]   You can delete it when no longer needed: git branch -D {backup_branch}[/dim]")
+                
+        except Exception as e:
+            self.console.print(f"[red]❌ Operation failed: {e}[/red]")
+            if backup_manager.backup_branch:
+                self.console.print(f"[yellow]🔄 Repository automatically restored from backup: {backup_manager.backup_branch}[/yellow]")
+                self.console.print(f"[blue]📦 Backup branch preserved for investigation: {backup_manager.backup_branch}[/blue]")
+                self.console.print(f"[dim]   Your repository is now back to its original state.[/dim]")
+                self.console.print(f"[dim]   You can examine the backup branch to understand what was attempted.[/dim]")
+                self.console.print(f"[dim]   To delete the backup when done: git branch -D {backup_manager.backup_branch}[/dim]")
             sys.exit(1)
+
+    def _check_working_directory_clean(self) -> Dict[str, Any]:
+        """
+        Check if the working directory is clean (no uncommitted changes).
+        
+        Returns:
+            Dictionary with:
+            - is_clean: bool - True if working directory is clean
+            - staged_files: List[str] - List of staged files
+            - unstaged_files: List[str] - List of modified but unstaged files  
+            - untracked_files: List[str] - List of untracked files
+            - message: str - Human readable status message
+        """
+        try:
+            # Get detailed status using porcelain format
+            result = subprocess.run(
+                ['git', 'status', '--porcelain'],
+                capture_output=True, text=True, check=True
+            )
+            
+            status_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            staged_files = []
+            unstaged_files = []
+            untracked_files = []
+            
+            for line in status_lines:
+                if len(line) >= 2:
+                    index_status = line[0]
+                    worktree_status = line[1]
+                    file_path = line[3:] if len(line) > 3 else ""
+                    
+                    # Check index (staged) status
+                    if index_status != ' ' and index_status != '?':
+                        staged_files.append(file_path)
+                    
+                    # Check worktree (unstaged) status
+                    if worktree_status != ' ' and worktree_status != '?':
+                        unstaged_files.append(file_path)
+                    
+                    # Check for untracked files
+                    if index_status == '?' and worktree_status == '?':
+                        untracked_files.append(file_path)
+            
+            is_clean = len(staged_files) == 0 and len(unstaged_files) == 0 and len(untracked_files) == 0
+            
+            # Generate human-readable message
+            if is_clean:
+                message = "Working directory is clean"
+            else:
+                parts = []
+                if staged_files:
+                    parts.append(f"{len(staged_files)} staged file(s)")
+                if unstaged_files:
+                    parts.append(f"{len(unstaged_files)} unstaged change(s)")
+                if untracked_files:
+                    parts.append(f"{len(untracked_files)} untracked file(s)")
+                message = f"Working directory has uncommitted changes: {', '.join(parts)}"
+            
+            return {
+                "is_clean": is_clean,
+                "staged_files": staged_files,
+                "unstaged_files": unstaged_files,
+                "untracked_files": untracked_files,
+                "message": message
+            }
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to check working directory status: {e}")
+            return {
+                "is_clean": False,
+                "staged_files": [],
+                "unstaged_files": [],
+                "untracked_files": [],
+                "message": "Unable to determine working directory status"
+            }
+
+    def _display_working_directory_help(self, status_info: Dict[str, Any]):
+        """
+        Display helpful information about cleaning up the working directory.
+        
+        Args:
+            status_info: Status information from _check_working_directory_clean()
+        """
+        self.console.print(f"[red]❌ Cannot proceed: {status_info['message']}[/red]")
+        self.console.print("[yellow]Git Smart Squash requires a clean working directory to operate safely.[/yellow]")
+        self.console.print("")
+        
+        if status_info['staged_files']:
+            self.console.print("[bold]Staged files (ready to commit):[/bold]")
+            for file_path in status_info['staged_files'][:10]:  # Limit display
+                self.console.print(f"  📝 {file_path}")
+            if len(status_info['staged_files']) > 10:
+                self.console.print(f"  ... and {len(status_info['staged_files']) - 10} more")
+            self.console.print("")
+            self.console.print("[dim]To handle staged files:[/dim]")
+            self.console.print("[dim]  • Commit them: git commit -m \"Your message\"[/dim]")
+            self.console.print("[dim]  • Unstage them: git reset HEAD[/dim]")
+            self.console.print("")
+        
+        if status_info['unstaged_files']:
+            self.console.print("[bold]Modified files (unstaged):[/bold]")
+            for file_path in status_info['unstaged_files'][:10]:  # Limit display
+                self.console.print(f"  📄 {file_path}")
+            if len(status_info['unstaged_files']) > 10:
+                self.console.print(f"  ... and {len(status_info['unstaged_files']) - 10} more")
+            self.console.print("")
+            self.console.print("[dim]To handle unstaged changes:[/dim]")
+            self.console.print("[dim]  • Commit them: git add . && git commit -m \"Your message\"[/dim]")
+            self.console.print("[dim]  • Stash them: git stash[/dim]")
+            self.console.print("[dim]  • Discard them: git checkout .[/dim]")
+            self.console.print("")
+        
+        if status_info['untracked_files']:
+            self.console.print("[bold]Untracked files:[/bold]")
+            for file_path in status_info['untracked_files'][:10]:  # Limit display
+                self.console.print(f"  ❓ {file_path}")
+            if len(status_info['untracked_files']) > 10:
+                self.console.print(f"  ... and {len(status_info['untracked_files']) - 10} more")
+            self.console.print("")
+            self.console.print("[dim]To handle untracked files:[/dim]")
+            self.console.print("[dim]  • Add and commit them: git add . && git commit -m \"Your message\"[/dim]")
+            self.console.print("[dim]  • Remove them: rm <filename> (be careful!)[/dim]")
+            self.console.print("[dim]  • Ignore them: add to .gitignore[/dim]")
+            self.console.print("")
+        
+        self.console.print("[green]💡 Once your working directory is clean, run git-smart-squash again.[/green]")
+
+    def _apply_commits_with_backup(self, commit_plan: Dict[str, Any], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool, progress, backup_branch: str):
+        """Apply commits with backup context already established."""
+        # 1. Create hunk ID to Hunk object mapping
+        hunks_by_id = {hunk.id: hunk for hunk in hunks}
+
+        # 2. Reset to base branch
+        task = progress.add_task("Resetting to base branch...", total=None)
+        # Use --hard reset to ensure working directory is clean
+        # This is safe because we've already created a backup branch
+        subprocess.run(['git', 'reset', '--hard', base_branch], check=True)
+
+        # 3. Create new commits based on the plan
+        progress.update(task, description="Creating new commits...")
+
+        commits = commit_plan.get("commits", [])
+        if commits:
+            commits_created = 0
+            all_applied_hunk_ids = set()
+
+            for i, commit in enumerate(commits):
+                progress.update(task, description=f"Creating commit {i+1}/{len(commits)}: {commit['message'][:50]}...")
+
+                # Reset staging area before each commit
+                reset_staging_area()
+
+                # Get hunk IDs for this commit
+                hunk_ids = commit.get('hunk_ids', [])
+
+                # Backward compatibility: handle old format with files
+                if not hunk_ids and commit.get('files'):
+                    # Convert files to hunk IDs by finding hunks that belong to those files
+                    file_paths = commit.get('files', [])
+                    hunk_ids = [hunk.id for hunk in hunks if hunk.file_path in file_paths]
+
+                if hunk_ids:
+                    try:
+                        # Apply hunks using the hunk applicator
+                        self.logger.debug(f"Attempting to apply {len(hunk_ids)} hunks for commit: {commit['message']}")
+                        self.logger.debug(f"Hunk IDs: {hunk_ids}")
+
+                        success = apply_hunks_with_fallback(hunk_ids, hunks_by_id, full_diff)
+
+                        self.logger.debug(f"Hunk application result: {'success' if success else 'failed'}")
+
+                        if success:
+                            # Check if there are actually staged changes
+                            result = subprocess.run(['git', 'diff', '--cached', '--name-only'],
+                                                  capture_output=True, text=True)
+
+                            staged_files = result.stdout.strip()
+                            self.logger.debug(f"Staged files after hunk application: {staged_files if staged_files else 'NONE'}")
+
+                            if staged_files:
+                                # Add attribution to commit message if not disabled
+                                commit_message = commit['message']
+                                if not no_attribution and self.config.attribution.enabled:
+                                    attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
+                                    full_message = commit_message + attribution
+                                else:
+                                    full_message = commit_message
+
+                                # Create the commit
+                                subprocess.run([
+                                    'git', 'commit', '-m', full_message
+                                ], check=True)
+                                commits_created += 1
+                                all_applied_hunk_ids.update(hunk_ids)
+                                self.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
+
+                                # Update working directory to match the commit
+                                # This ensures files reflect the committed state
+                                subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+
+                                # Additional sync to ensure working directory is fully updated
+                                # Force git to refresh the working directory state
+                                subprocess.run(['git', 'status'], capture_output=True, check=True)
+                            else:
+                                self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
+                                self.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
+                                self.logger.debug("This can happen when:")
+                                self.logger.debug("  - Hunks failed to apply due to conflicts")
+                                self.logger.debug("  - Hunks were already applied in a previous commit")
+                                self.logger.debug("  - The patch content was invalid or empty")
+                                self.logger.debug("Run with --debug to see detailed hunk application logs")
+                        else:
+                            self.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
+                            self.logger.error(f"Hunk application failed for commit: {commit['message']}")
+                            self.logger.debug(f"Failed hunk IDs: {hunk_ids}")
+
+                    except Exception as e:
+                        self.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
+                else:
+                    self.console.print(f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]")
+
+            # 4. Check for remaining hunks that weren't included in any commit
+            remaining_hunk_ids = [hunk.id for hunk in hunks if hunk.id not in all_applied_hunk_ids]
+
+            if remaining_hunk_ids:
+                progress.update(task, description="Creating final commit for remaining changes...")
+                reset_staging_area()
+
+                try:
+                    success = apply_hunks_with_fallback(remaining_hunk_ids, hunks_by_id, full_diff)
+                    if success:
+                        result = subprocess.run(['git', 'diff', '--cached', '--name-only'],
+                                              capture_output=True, text=True)
+                        if result.stdout.strip():
+                            # Add attribution to commit message if not disabled
+                            if not no_attribution and self.config.attribution.enabled:
+                                attribution = "\n\n----\nMade with git-smart-squash\nhttps://github.com/edverma/git-smart-squash"
+                                full_message = 'chore: remaining uncommitted changes' + attribution
+                            else:
+                                full_message = 'chore: remaining uncommitted changes'
+
+                            subprocess.run([
+                                'git', 'commit', '-m', full_message
+                            ], check=True)
+                            commits_created += 1
+                            self.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
+
+                            # Update working directory to match the commit
+                            subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+
+                            # Additional sync to ensure working directory is fully updated
+                            # Force git to refresh the working directory state
+                            subprocess.run(['git', 'status'], capture_output=True, check=True)
+                except Exception as e:
+                    self.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
+
+            # Working directory is now kept in sync after each commit,
+            # so no need for a final reset
+
+            self.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
 
 
 def main():
