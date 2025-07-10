@@ -58,7 +58,7 @@ export GEMINI_API_KEY="your-key"
 
 ```bash
 cd your-repo
-git-smart-squash  # or just 'gss'
+git-smart-squash
 ```
 
 That's it. Review the plan and approve.
