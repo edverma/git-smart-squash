@@ -78,7 +78,6 @@ setup(
     entry_points={
         "console_scripts": [
             "git-smart-squash=git_smart_squash.cli:main",
-            "gss=git_smart_squash.cli:main",
         ],
     },
     cmdclass={
