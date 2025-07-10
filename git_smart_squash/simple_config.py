@@ -36,6 +36,7 @@ class Config:
     hunks: HunkConfig
     attribution: AttributionConfig
     auto_apply: bool = False
+    base: str = "main"
 
 
 class ConfigManager:
@@ -110,8 +111,11 @@ class ConfigManager:
 
         # Load auto-apply setting
         auto_apply = config_data.get('auto_apply', False)
+        
+        # Load base branch setting
+        base = config_data.get('base', 'main')
 
-        return Config(ai=ai_config, hunks=hunk_config, attribution=attribution_config, auto_apply=auto_apply)
+        return Config(ai=ai_config, hunks=hunk_config, attribution=attribution_config, auto_apply=auto_apply, base=base)
 
     def create_default_config(self, global_config: bool = False) -> str:
         """Create a default config file."""
@@ -129,7 +133,8 @@ class ConfigManager:
             'attribution': {
                 'enabled': True
             },
-            'auto_apply': False
+            'auto_apply': False,
+            'base': 'main'
         }
 
         if global_config:

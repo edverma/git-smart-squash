@@ -51,6 +51,10 @@ class GitSmartSquashCLI:
                     self.config.ai.model = self.config_manager._get_default_model(args.ai_provider)
             if args.model:
                 self.config.ai.model = args.model
+            
+            # Use base branch from config if not provided via CLI
+            if args.base is None:
+                args.base = self.config.base
 
             # Run the simplified smart squash
             self.run_smart_squash(args)
@@ -68,8 +72,8 @@ class GitSmartSquashCLI:
 
         parser.add_argument(
             '--base',
-            default='main',
-            help='Base branch to compare against (default: main)'
+            default=None,
+            help='Base branch to compare against (default: from config or main)'
         )
 
 
