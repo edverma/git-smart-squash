@@ -1,69 +1,118 @@
 # Git Smart Squash
 
-Use AI to transform your messy commit history into clean, logical commits that reviewers will love
+Stop wasting time manually reorganizing commits. Let AI do it for you.
 
-## Why Use Git Smart Squash?
+## The Problem
 
-Ever spent 30 minutes reorganizing commits before a PR? We've all been there. Git Smart Squash uses AI to automatically organize your changes into logical, well-structured commits in seconds.
+You've been there: 15 commits for a feature, half of them are "fix", "typo", or "WIP". Now you need to clean it up for PR review. Manually squashing and rewriting is tedious.
 
-### What It Does
+## The Solution
 
-**Before** (your typical feature branch):
+Git Smart Squash analyzes your changes and reorganizes them into logical commits with proper messages:
+
+```bash
+# Before: your messy branch
+* fix tests
+* typo  
+* more auth changes
+* WIP: working on auth
+* update tests
+* initial auth implementation
+
+# After: clean, logical commits
+* feat: implement JWT authentication system
+* test: add auth endpoint coverage
 ```
-* 7f8d9e0 fix tests
-* 6c5b4a3 typo
-* 5a4b3c2 more auth changes
-* 4d3c2b1 WIP: working on auth
-* 3c2b1a0 update tests
-* 2b1a0f9 initial auth implementation
-```
 
-**After** (AI-organized commits):
-```
-* a1b2c3d feat: implement complete authentication system with JWT tokens
-* e4f5g6h test: add comprehensive test coverage for auth endpoints
-```
-
-The AI analyzes your entire diff and groups related changes together, creating clean commit messages that follow conventional commit standards.
-
-## Quick Start (2 minutes)
+## Quick Start
 
 ### 1. Install
 
 ```bash
+# Using pip
 pip install git-smart-squash
+
+# Using pipx (recommended for isolated install)
+pipx install git-smart-squash
+
+# Using uv (fast Python package manager)
+uv tool install git-smart-squash
 ```
 
-### 2. Set up AI (choose one)
+### 2. Set up AI
 
-**Option A: Local AI (Free & Private) - Default for Privacy**
+**Option A: Local (Free, Private)**
 ```bash
 # Install Ollama from https://ollama.com
-ollama serve
-ollama pull devstral
+ollama pull devstral  # Default model
 ```
 
-**Option B: Cloud AI (if you have API keys)**
+**Option B: Cloud (Better results)**
 ```bash
-export OPENAI_API_KEY="your-key"      # or
-export ANTHROPIC_API_KEY="your-key"   # or
+export OPENAI_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key"
 export GEMINI_API_KEY="your-key"
 ```
 
-### 3. Use It!
+### 3. Run
 
 ```bash
-cd your-git-repo
-git checkout your-feature-branch
-
-# Run it - shows the plan and asks for confirmation
-git-smart-squash
-
-# Or auto-apply without confirmation prompt
-git-smart-squash --auto-apply
+cd your-repo
+git-smart-squash  # or just 'gss'
 ```
 
-That's it! Your commits are now beautifully organized.
+That's it. Review the plan and approve.
+
+## Command Line Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--base` | Base branch to compare against | Config file or `main` |
+| `--ai-provider` | AI provider to use (openai, anthropic, local, gemini) | Configured in settings |
+| `--model` | Specific AI model to use (see recommended models below) | Provider default |
+| `--config` | Path to custom configuration file | `.git-smart-squash.yml` or `~/.git-smart-squash.yml` |
+| `--auto-apply` | Apply commit plan without confirmation prompt | `false` |
+| `--instructions`, `-i` | Custom instructions for AI (e.g., "Group by feature area") | None |
+| `--no-attribution` | Disable attribution message in commits | `false` |
+| `--debug` | Enable debug logging for detailed information | `false` |
+
+## Recommended Models
+
+### Default Models
+- **OpenAI**: `gpt-4.1` (default)
+- **Anthropic**: `claude-sonnet-4-20250514` (default)
+- **Gemini**: `gemini-2.5-pro` (default)
+- **Local/Ollama**: `devstral` (default)
+
+### Model Selection
+```bash
+# Specify a different model
+git-smart-squash --ai-provider openai --model gpt-4.1-mini
+
+# For local Ollama
+git-smart-squash --ai-provider local --model llama-3.1
+```
+
+## Custom Instructions
+
+The `--instructions` parameter lets you control how commits are organized:
+
+### Examples
+```bash
+# Add ticket prefixes
+git-smart-squash -i "Prefix all commits with [ABC-1234]"
+
+# Separate by type
+git-smart-squash -i "Keep backend and frontend changes in separate commits"
+
+# Limit commit count
+git-smart-squash -i "Create at most 3 commits total"
+```
+
+### Tips for Better Results
+- **Be specific**: "Group database migrations separately" works better than "organize nicely"
+- **One instruction at a time**: Complex multi-part instructions may be partially ignored
+- **Use better models**: Larger models follow instructions more reliably than smaller models
 
 ## Common Use Cases
 
@@ -83,68 +132,31 @@ git-smart-squash --base develop
 git-smart-squash --ai-provider openai
 ```
 
-### "I use the short command"
+## Safety
+
+**Your code is safe:**
+- Shows plan before making changes
+- Creates automatic backup branch
+- Requires clean working directory
+- Never pushes without your command
+
+**If something goes wrong:**
 ```bash
-gss  # Same as git-smart-squash
-```
-
-## Safety First
-
-Don't worry - Git Smart Squash is designed to be safe:
-
-- **Dry run by default** - always shows you the plan first
-- **Requires clean working directory** - protects uncommitted changes
-- **Automatic backup creation** - creates a backup branch before any changes
-- **Automatic restoration on failure** - restores your branch if anything goes wrong
-- **Never pushes automatically** - you stay in control
-- **Easy recovery** - backup branches are preserved for manual recovery
-
-### Working Directory Requirements
-
-Git Smart Squash requires a clean working directory to operate safely. If you have uncommitted changes, you'll see helpful instructions:
-
-```bash
-# For staged files:
-git commit -m "Your message"  # Commit them, or
-git reset HEAD               # Unstage them
-
-# For modified files:
-git add . && git commit      # Commit them, or
-git stash                    # Temporarily save them
-
-# For untracked files:
-git add . && git commit      # Add and commit them, or
-# Add to .gitignore if they should be ignored
-```
-
-### Automatic Backup System
-
-Every time you run git-smart-squash, it automatically:
-1. Creates a backup branch with timestamp (e.g., `feature-branch-backup-1704067200`)
-2. Preserves this backup even after successful operations
-3. Automatically restores from backup if anything fails
-
-### Recovery Options
-
-```bash
-# Find your backups
+# Find backup
 git branch | grep backup
 
-# Restore from a specific backup
+# Restore
 git reset --hard your-branch-backup-[timestamp]
-
-# Delete old backups when no longer needed
-git branch -D your-branch-backup-[timestamp]
 ```
 
-## AI Provider Options
+## AI Providers
 
-| Provider | Cost | Privacy | Setup |
-|----------|------|---------|-------|
-| **Ollama** (default) | Free | 100% Local | `ollama pull devstral` |
-| **OpenAI** | ~$0.01/use | Cloud | Set `OPENAI_API_KEY` |
-| **Anthropic** | ~$0.01/use | Cloud | Set `ANTHROPIC_API_KEY` |
-| **Gemini** | ~$0.01/use | Cloud | Set `GEMINI_API_KEY` |
+| Provider | Cost | Privacy |
+|----------|------|---------|
+| **Ollama** | Free | Local |
+| **OpenAI** | ~$0.01 | Cloud |
+| **Anthropic** | ~$0.01 | Cloud |
+| **Gemini** | ~$0.01 | Cloud |
 
 ## Advanced Configuration (Optional)
 
@@ -154,35 +166,62 @@ Want to customize? Create a config file:
 ```yaml
 ai:
   provider: openai  # Use OpenAI for this project
+base: develop       # Use develop as the base branch for this project
 ```
 
 **Global default** (`~/.git-smart-squash.yml`):
 ```yaml
 ai:
   provider: local   # Always use local AI by default
+base: main          # Default base branch for all projects
 ```
 
 ## Troubleshooting
 
-### "Ollama not found"
-Install Ollama from https://ollama.com and run:
+### "Invalid JSON" Error
+This usually means the AI model couldn't format the response properly:
+- **With Ollama**: Switch from `llama2` to `mistral` or `mixtral`
+- **Solution**: `ollama pull mistral` then retry
+- **Alternative**: Use a cloud provider with `--ai-provider openai`
+
+### Model Not Following Instructions
+Some models struggle with complex instructions:
+- **Use better models**: `--model gpt-4-turbo` or `--model claude-3-opus`
+- **Simplify instructions**: One clear directive works better than multiple
+- **Be explicit**: "Prefix with [ABC-123]" not "add ticket number"
+
+### "Ollama not found" 
 ```bash
+# Install from https://ollama.com
 ollama serve
-ollama pull devstral
+ollama pull devstral  # Default model
+```
+
+### Poor Commit Grouping
+If the AI creates too many commits or doesn't group well:
+- **Insufficient model**: Use a larger model
+- **Add instructions**: `-i "Group related changes, max 3 commits"`
+- **Provide Feedback**: Create an issue on GitHub and let us know what happened
+
+### Installation Issues (Mac)
+If you don't have pip or prefer isolated installs:
+```bash
+# Using pipx (recommended)
+brew install pipx
+pipx install git-smart-squash
 ```
 
 ### "No changes to reorganize"
-Make sure you're on your feature branch with committed work:
 ```bash
-git diff main  # Should show differences from main
+git log --oneline main..HEAD  # Check you have commits
+git diff main                 # Check you have changes
 ```
 
-### "Large diff taking too long" or "Token limit exceeded"
-When using Ollama (local AI), there's a hard limit of 32,000 tokens (roughly 128,000 characters).
-For large diffs, try:
-- Breaking your work into smaller chunks
-- Using `--base` with a more recent commit
-- Switching to a cloud provider for this operation: `--ai-provider openai`
+### Large Diffs / Token Limits
+Local models have a ~32k token limit. For large changes:
+- Use `--base` with a more recent commit
+- Switch to cloud: `--ai-provider openai`
+- Split into smaller PRs
 
 ### Need More Help?
 
@@ -192,6 +231,3 @@ Check out our [detailed documentation](DOCUMENTATION.md) or open an issue!
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
----
-
-**Made with love for developers who want cleaner git history**
