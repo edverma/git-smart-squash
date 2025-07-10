@@ -79,8 +79,6 @@ pip install -e ".[dev]"
 
 ```bash
 git-smart-squash --help
-# or use the short alias
-gss --help
 ```
 
 ## Getting Started
