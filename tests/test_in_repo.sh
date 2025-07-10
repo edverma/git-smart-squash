@@ -119,15 +119,15 @@ case $option in
             echo "# Test change $(date)" >> README.md
             echo "test_file_$(date +%s).tmp" >> .gitignore
         fi
-        
+
         print_info "Running git-smart-squash with --debug flag..."
         echo
         git-smart-squash --debug --base main || true
         ;;
-        
+
     2)
         print_info "Testing with existing commits..."
-        
+
         # Find the base branch
         BASE_BRANCH="main"
         if ! git show-ref --verify --quiet refs/heads/main; then
@@ -137,7 +137,7 @@ case $option in
                 read -p "Enter base branch name: " BASE_BRANCH
             fi
         fi
-        
+
         # Check if current branch has commits ahead of base
         COMMITS_AHEAD=$(git rev-list --count "$BASE_BRANCH".."$CURRENT_BRANCH" 2>/dev/null || echo "0")
         if [ "$COMMITS_AHEAD" -eq "0" ]; then
@@ -156,50 +156,50 @@ case $option in
             git-smart-squash --debug --base "$BASE_BRANCH" || true
         fi
         ;;
-        
+
     3)
         print_info "Creating test commits for demonstration..."
-        
+
         # Create a test branch
         TEST_BRANCH="test-gss-$(date +%s)"
         git checkout -b "$TEST_BRANCH"
-        
+
         # Create multiple test commits
         print_info "Creating test file changes..."
-        
+
         # Commit 1: Add new feature
         echo "def new_feature():" > test_feature.py
         echo "    return 'This is a new feature'" >> test_feature.py
         git add test_feature.py
         git commit -m "feat: add new feature function"
-        
+
         # Commit 2: Add documentation
         echo "# Test Feature" > test_feature.md
         echo "This is documentation for the test feature" >> test_feature.md
         git add test_feature.md
         git commit -m "docs: add documentation for test feature"
-        
+
         # Commit 3: Fix typo
         echo "def new_feature():" > test_feature.py
         echo "    return 'This is a new feature!'" >> test_feature.py
         git add test_feature.py
         git commit -m "fix: add exclamation mark"
-        
+
         # Commit 4: Add tests
         echo "def test_new_feature():" > test_test_feature.py
         echo "    assert new_feature() == 'This is a new feature!'" >> test_test_feature.py
         git add test_test_feature.py
         git commit -m "test: add unit test for new feature"
-        
+
         print_success "Created 4 test commits"
         print_info "Running git-smart-squash with --debug flag..."
         echo
         git-smart-squash --debug --base "$CURRENT_BRANCH" || true
-        
+
         print_info "Test branch: $TEST_BRANCH"
         print_info "To cleanup: git checkout $CURRENT_BRANCH && git branch -D $TEST_BRANCH"
         ;;
-        
+
     4)
         print_info "Enter your git-smart-squash command (--debug will be added):"
         read -p "> git-smart-squash " custom_args
@@ -208,7 +208,7 @@ case $option in
         echo
         git-smart-squash --debug $custom_args || true
         ;;
-        
+
     *)
         print_error "Invalid option"
         exit 1

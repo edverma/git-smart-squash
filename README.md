@@ -13,7 +13,7 @@ Git Smart Squash analyzes your changes and reorganizes them into logical commits
 ```bash
 # Before: your messy branch
 * fix tests
-* typo  
+* typo
 * more auth changes
 * WIP: working on auth
 * update tests
@@ -58,7 +58,7 @@ export GEMINI_API_KEY="your-key"
 
 ```bash
 cd your-repo
-git-smart-squash  # or just 'gss'
+git-smart-squash
 ```
 
 That's it. Review the plan and approve.
@@ -190,7 +190,7 @@ Some models struggle with complex instructions:
 - **Simplify instructions**: One clear directive works better than multiple
 - **Be explicit**: "Prefix with [ABC-123]" not "add ticket number"
 
-### "Ollama not found" 
+### "Ollama not found"
 ```bash
 # Install from https://ollama.com
 ollama serve
@@ -230,4 +230,3 @@ Check out our [detailed documentation](DOCUMENTATION.md) or open an issue!
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
