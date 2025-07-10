@@ -34,6 +34,9 @@ pip install git-smart-squash
 
 # Using pipx (recommended for isolated install)
 pipx install git-smart-squash
+
+# Using uv (fast Python package manager)
+uv tool install git-smart-squash
 ```
 
 ### 2. Set up AI
@@ -46,9 +49,9 @@ ollama pull devstral  # Default model
 
 **Option B: Cloud (Better results)**
 ```bash
-export OPENAI_API_KEY="your-key"      # GPT-4
-export ANTHROPIC_API_KEY="your-key"   # Claude
-export GEMINI_API_KEY="your-key"      # Gemini
+export OPENAI_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key"
+export GEMINI_API_KEY="your-key"
 ```
 
 ### 3. Run
@@ -94,7 +97,7 @@ git-smart-squash --ai-provider local --model llama-3.1
 
 The `--instructions` parameter lets you control how commits are organized:
 
-### Examples That Work Well
+### Examples
 ```bash
 # Add ticket prefixes
 git-smart-squash -i "Prefix all commits with [ABC-1234]"
@@ -109,12 +112,7 @@ git-smart-squash -i "Create at most 3 commits total"
 ### Tips for Better Results
 - **Be specific**: "Group database migrations separately" works better than "organize nicely"
 - **One instruction at a time**: Complex multi-part instructions may be partially ignored
-- **Use better models**: GPT-4 and Claude follow instructions more reliably than smaller models
-
-### Example: Linear/Jira Integration
-```bash
-git-smart-squash -i "Start every commit with [PROJ-123] for issue tracking"
-```
+- **Use better models**: Larger models follow instructions more reliably than smaller models
 
 ## Common Use Cases
 
@@ -132,11 +130,6 @@ git-smart-squash --base develop
 ### "I want to use a specific AI provider"
 ```bash
 git-smart-squash --ai-provider openai
-```
-
-### "I use the short command"
-```bash
-gss  # Same as git-smart-squash
 ```
 
 ## Safety
@@ -206,9 +199,9 @@ ollama pull devstral  # Default model
 
 ### Poor Commit Grouping
 If the AI creates too many commits or doesn't group well:
-- **Wrong model**: Avoid `llama2`, use `mistral` or cloud providers
+- **Insufficient model**: Use a larger model
 - **Add instructions**: `-i "Group related changes, max 3 commits"`
-- **Try OpenAI**: `--ai-provider openai` for best results
+- **Provide Feedback**: Create an issue on GitHub and let us know what happened
 
 ### Installation Issues (Mac)
 If you don't have pip or prefer isolated installs:

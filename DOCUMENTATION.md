@@ -49,7 +49,17 @@ pip install git-smart-squash
 pipx install git-smart-squash
 ```
 
-#### 3. From Source
+#### 3. Using uv (Fast Python Package Manager)
+
+```bash
+# Install with uv tool
+uv tool install git-smart-squash
+
+# Or in a project with uv pip
+uv pip install git-smart-squash
+```
+
+#### 4. From Source
 
 ```bash
 git clone https://github.com/your-username/git-smart-squash.git
@@ -57,7 +67,7 @@ cd git-smart-squash
 pip install -e .
 ```
 
-#### 4. Development Installation
+#### 5. Development Installation
 
 ```bash
 git clone https://github.com/your-username/git-smart-squash.git
@@ -135,13 +145,14 @@ git-smart-squash [OPTIONS]
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--base BASE` | | Base branch to compare against | `main` |
-| `--ai-provider PROVIDER` | | AI provider to use (`local`, `openai`, `anthropic`, `gemini`) | `local` |
+| `--base BASE` | | Base branch to compare against | Config file or `main` |
+| `--ai-provider PROVIDER` | | AI provider to use (`local`, `openai`, `anthropic`, `gemini`) | Config file or `local` |
 | `--model MODEL` | | Specific model to use | Provider default |
 | `--config PATH` | | Path to configuration file | Auto-detected |
-| `--auto-apply` | | Apply changes without confirmation prompt | `false` |
-| `--instructions TEXT` | `-i` | Custom instructions for AI | None |
-| `--no-attribution` | | Disable attribution message in commits | `false` |
+| `--auto-apply` | | Apply changes without confirmation prompt | Config file or `false` |
+| `--instructions TEXT` | `-i` | Custom instructions for AI | Config file or none |
+| `--no-attribution` | | Disable attribution message in commits | Config file or `false` |
+| `--debug` | | Enable debug logging for detailed hunk application info | `false` |
 
 ### Examples
 
@@ -191,9 +202,12 @@ ollama pull devstral
 
 **Models:**
 - `devstral` (default) - Optimized for code understanding
-- `codellama` - Alternative code-focused model
-- `mixtral` - General purpose with good code understanding
+- `mistral` - Good alternative, avoids issues seen with llama2
+- `mixtral` - General purpose with good code understanding  
+- `codellama` - Code-focused model
 - Any model available in Ollama - Specify with `--model` flag
+
+**Note**: Avoid `llama2` as it tends to create too many separate commits instead of grouping related changes.
 
 ### OpenAI
 
@@ -208,9 +222,10 @@ export OPENAI_API_KEY="sk-..."
 ```
 
 **Models:**
-- `gpt-4.1` (default) - Latest and best quality
-- `gpt-4o` - Previous generation
-- `gpt-4o-mini` - Faster, more economical
+- `gpt-4.1` (default) - Latest model with best quality
+- `gpt-4o` - Previous generation, still very capable
+- `gpt-4o-mini` - Faster and more economical
+- `o1`, `o3` - Advanced reasoning models for complex reorganizations
 - Any other OpenAI model - Specify with `--model` flag
 
 **Pricing:** ~$0.01 per typical use
@@ -228,9 +243,9 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 **Models:**
-- `claude-sonnet-4-20250514` (default) - Claude Sonnet 4, latest model
-- `claude-3-5-sonnet-20241022` - Previous generation
-- `claude-3-opus-20240229` - Higher quality, slower
+- `claude-sonnet-4-20250514` (default) - Claude Sonnet 4, excellent for coding
+- `claude-4-opus` - Top-tier model for complex code understanding
+- `claude-3-5-sonnet-20241022` - Previous generation, still very good
 - Any other Anthropic model - Specify with `--model` flag
 
 **Pricing:** ~$0.01 per typical use
@@ -249,9 +264,9 @@ export GEMINI_API_KEY="..."
 ```
 
 **Models:**
-- `gemini-2.5-pro` (default) - Gemini 2.5 Pro, latest model
-- `gemini-2.0-flash-exp` - Faster, lighter model
-- `gemini-1.5-pro` - Previous generation
+- `gemini-2.5-pro` (default) - Latest Gemini model with excellent performance
+- `gemini-2.0-flash` - Faster and cost-effective for simpler tasks
+- `gemini-2.0-pro` - Alternative with good multimodal capabilities
 - Any other Gemini model - Specify with `--model` flag
 
 **Pricing:** ~$0.01 per typical use
@@ -274,37 +289,18 @@ ai:
   provider: local  # or openai, anthropic, gemini
   model: devstral  # optional, uses provider default if not set
                    # You can specify ANY model supported by the provider
+  instructions: |  # Optional custom instructions for AI
+    Always group database migrations separately.
+    Keep test changes in their own commits.
 
-  # Provider-specific settings
-  local:
-    base_url: http://localhost:11434  # Ollama server URL
-    timeout: 600  # Request timeout in seconds
+# Base Branch Settings
+base: main  # Default base branch for all operations
 
-  openai:
-    api_key: ${OPENAI_API_KEY}  # Can reference environment variables
-    organization: org-...  # Optional organization ID
-
-  anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-
-  gemini:
-    api_key: ${GEMINI_API_KEY}
-
-# Git Settings
-git:
-  default_base: main  # Default base branch
-  backup_branch: true  # Create backup branches
-
-# Output Settings
-output:
-  color: true  # Use colored output
-  verbose: false  # Show detailed progress
-
-# Custom Instructions
-instructions: |
-  Always group database migrations separately.
-  Keep test changes in their own commits.
-  Separate documentation updates from code changes.
+# Hunk Processing Settings
+hunks:
+  show_hunk_context: true  # Include context in hunk display
+  context_lines: 3  # Number of context lines around changes
+  max_hunks_per_prompt: 100  # Maximum hunks to send to AI at once
 
 # Attribution Settings
 attribution:
@@ -333,40 +329,44 @@ auto_apply: false  # Set to true to apply commits without confirmation
    - Provides helpful instructions if working directory is not clean
    - Ensures no data loss from uncommitted work
 
-2. **Diff Extraction**
+2. **Diff Extraction and Parsing**
    - Calculates complete diff: `git diff BASE...HEAD`
-   - Includes all changes between base branch and current HEAD
-   - Preserves file paths, hunks, and context
+   - Parses diff into individual "hunks" (discrete change blocks)
+   - Each hunk gets a unique ID based on file path and line numbers
+   - Preserves context around changes for better understanding
 
-3. **AI Analysis**
-   - Sends diff to selected AI provider
-   - AI analyzes code changes for logical groupings
-   - Considers file relationships, functionality, and dependencies
-   - Generates commit plan with messages and file groupings
+3. **Hunk-Based AI Analysis**
+   - Sends individual hunks to AI instead of raw diff
+   - AI analyzes each hunk's purpose and relationships
+   - Groups related hunks together based on functionality
+   - Generates commit plan with hunk IDs (not just files)
+   - Respects dependencies between hunks
 
 4. **Plan Presentation**
    - Displays proposed commit structure
-   - Shows which files belong to each commit
+   - Shows which hunks (specific line ranges) belong to each commit
+   - Groups hunks by file for readability
    - Provides rationale for each grouping
-   - Waits for user confirmation (unless `--auto-apply` used or configured)
+   - Waits for user confirmation (unless `--auto-apply`)
 
-5. **Backup and History Rewriting**
+5. **Backup and Smart Application**
    - Creates persistent backup branch: `original-branch-backup-TIMESTAMP`
    - Final working directory check before applying changes
    - Hard resets to base branch: `git reset --hard BASE`
-   - Applies commits according to AI plan using hunk-based staging
+   - For each commit in the plan:
+     - Resets staging area
+     - Groups hunks by dependencies for proper ordering
+     - Applies hunks using sophisticated strategies:
+       - **Dependency-aware grouping**: Related hunks applied together
+       - **Atomic application**: Try applying interdependent hunks as a single patch
+       - **Sequential fallback**: Apply hunks one-by-one in dependency order
+       - **Git native mechanisms**: Uses `git apply --index` for immediate sync
+       - **Working directory integrity**: Saves/restores file states on failure
+       - **Rollback on error**: Restores staging state if group fails
+     - Creates commit with planned message
+     - Forces working directory sync after each commit
    - If any error occurs, automatically restores from backup
-   - Preserves all changes, only reorganizes history
-   - Adds attribution to each commit (unless disabled):
-     ```
-     feat: implement new feature
-
-     Detailed description of the changes...
-
-     ----
-     Made with git-smart-squash
-     https://github.com/edverma/git-smart-squash
-     ```
+   - Adds attribution to commits (unless disabled)
 
 ### Safety Mechanisms
 
@@ -636,16 +636,27 @@ git branch -D your-branch-backup-1234567890
 
 ### Debug Mode
 
-Enable verbose output for troubleshooting:
+Enable debug logging to see detailed information about hunk application and processing:
 
 ```bash
-# Set in config
-output:
-  verbose: true
+# Via command line flag
+git-smart-squash --debug
 
-# Or via environment
-export GIT_SMART_SQUASH_DEBUG=1
+# See what's happening during hunk application
+git-smart-squash --debug --base develop
 ```
+
+Debug mode shows:
+- Detailed hunk application attempts
+- Which hunks are being applied to each commit
+- Fallback strategies when direct application fails
+- Staging area operations
+- Working directory synchronization steps
+
+This is particularly useful when:
+- Commits are being skipped unexpectedly
+- You want to understand why certain changes aren't being applied
+- Troubleshooting complex reorganizations
 
 ## Best Practices
 
@@ -716,12 +727,36 @@ Git Smart Squash is built with:
 - **AI Communication**: HTTP clients for each provider
 - **UI**: Rich terminal library for formatted output
 
+### Hunk-Based Processing
+
+Git Smart Squash uses a sophisticated hunk-based approach rather than file-based commits:
+
+1. **Hunk Parsing**:
+   - Extracts individual change blocks (hunks) from git diff
+   - Each hunk has unique ID: `file_path:start_line-end_line`
+   - Preserves context lines for better AI understanding
+   - Detects dependencies between hunks
+
+2. **Dependency Analysis**:
+   - Identifies when hunks depend on each other
+   - Groups interdependent hunks for atomic application
+   - Uses topological sorting for correct application order
+   - Prevents partial application of related changes
+
+3. **Application Strategies**:
+   - **Git Apply with --index**: Updates both staging and working directory
+   - **State Preservation**: Saves file content before modifications
+   - **Integrity Checks**: Verifies files aren't corrupted after patches
+   - **Fallback Mechanisms**: Multiple strategies if primary fails
+   - **Debug Logging**: Detailed logs available with `--debug` flag
+
 ### Performance Considerations
 
 - **Token Estimation**: ~4 characters per token
 - **Local AI**: 30k token limit, ~600s timeout
 - **Cloud AI**: Provider-specific limits (usually 100k+)
 - **Memory Usage**: Proportional to diff size
+- **Hunk Limits**: Max 100 hunks per AI prompt (configurable)
 
 ### Security
 
