@@ -52,6 +52,10 @@ class GitSmartSquashCLI:
             if args.model:
                 self.config.ai.model = args.model
 
+            # Use base branch from config if not provided via CLI
+            if args.base is None:
+                args.base = self.config.base
+
             # Run the simplified smart squash
             self.run_smart_squash(args)
 
@@ -69,7 +73,7 @@ class GitSmartSquashCLI:
         parser.add_argument(
             '--base',
             default='main',
-            help='Base branch to compare against (default: main)'
+            help='Base branch to compare against (default: from config or main)'
         )
 
 
@@ -126,11 +130,11 @@ class GitSmartSquashCLI:
             # 0. Check working directory is clean before any operations
             self.console.print("[dim]Checking working directory status...[/dim]")
             status_info = self._check_working_directory_clean()
-            
+
             if not status_info['is_clean']:
                 self._display_working_directory_help(status_info)
                 return
-            
+
             self.console.print("[green]✓ Working directory is clean[/green]")
 
             # 1. Get the full diff between base branch and current branch
@@ -195,7 +199,7 @@ class GitSmartSquashCLI:
             # 4. Double-check working directory is still clean before applying changes
             self.console.print("[dim]Final working directory check before applying changes...[/dim]")
             final_status_info = self._check_working_directory_clean()
-            
+
             if not final_status_info['is_clean']:
                 self.console.print("[red]❌ Working directory changed during operation![/red]")
                 self._display_working_directory_help(final_status_info)
@@ -439,29 +443,29 @@ class GitSmartSquashCLI:
     def apply_commit_plan(self, commit_plan: Dict[str, Any], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool = False):
         """Apply the commit plan using hunk-based staging with automatic backup."""
         backup_manager = BackupManager()
-        
+
         try:
             with backup_manager.backup_context(prefix="git-smart-squash") as backup_branch:
                 self.console.print(f"[green]📦 Created backup branch: {backup_branch}[/green]")
                 self.console.print(f"[dim]   Your current state is safely backed up before applying changes.[/dim]")
-                
+
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     console=self.console
                 ) as progress:
                     self._apply_commits_with_backup(
-                        commit_plan, hunks, full_diff, base_branch, 
+                        commit_plan, hunks, full_diff, base_branch,
                         no_attribution, progress, backup_branch
                     )
-                
+
                 # Success - inform user backup is preserved with helpful info
                 self.console.print(f"[green]✓ Operation completed successfully![/green]")
                 self.console.print(f"[blue]📦 Backup branch created and preserved: {backup_branch}[/blue]")
                 self.console.print(f"[dim]   This backup contains your original state before changes were applied.[/dim]")
                 self.console.print(f"[dim]   You can restore it with: git reset --hard {backup_branch}[/dim]")
                 self.console.print(f"[dim]   You can delete it when no longer needed: git branch -D {backup_branch}[/dim]")
-                
+
         except Exception as e:
             self.console.print(f"[red]❌ Operation failed: {e}[/red]")
             if backup_manager.backup_branch:
@@ -475,12 +479,12 @@ class GitSmartSquashCLI:
     def _check_working_directory_clean(self) -> Dict[str, Any]:
         """
         Check if the working directory is clean (no uncommitted changes).
-        
+
         Returns:
             Dictionary with:
             - is_clean: bool - True if working directory is clean
             - staged_files: List[str] - List of staged files
-            - unstaged_files: List[str] - List of modified but unstaged files  
+            - unstaged_files: List[str] - List of modified but unstaged files
             - untracked_files: List[str] - List of untracked files
             - message: str - Human readable status message
         """
@@ -490,33 +494,33 @@ class GitSmartSquashCLI:
                 ['git', 'status', '--porcelain'],
                 capture_output=True, text=True, check=True
             )
-            
+
             status_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
-            
+
             staged_files = []
             unstaged_files = []
             untracked_files = []
-            
+
             for line in status_lines:
                 if len(line) >= 2:
                     index_status = line[0]
                     worktree_status = line[1]
                     file_path = line[3:] if len(line) > 3 else ""
-                    
+
                     # Check index (staged) status
                     if index_status != ' ' and index_status != '?':
                         staged_files.append(file_path)
-                    
+
                     # Check worktree (unstaged) status
                     if worktree_status != ' ' and worktree_status != '?':
                         unstaged_files.append(file_path)
-                    
+
                     # Check for untracked files
                     if index_status == '?' and worktree_status == '?':
                         untracked_files.append(file_path)
-            
+
             is_clean = len(staged_files) == 0 and len(unstaged_files) == 0 and len(untracked_files) == 0
-            
+
             # Generate human-readable message
             if is_clean:
                 message = "Working directory is clean"
@@ -529,7 +533,7 @@ class GitSmartSquashCLI:
                 if untracked_files:
                     parts.append(f"{len(untracked_files)} untracked file(s)")
                 message = f"Working directory has uncommitted changes: {', '.join(parts)}"
-            
+
             return {
                 "is_clean": is_clean,
                 "staged_files": staged_files,
@@ -537,7 +541,7 @@ class GitSmartSquashCLI:
                 "untracked_files": untracked_files,
                 "message": message
             }
-            
+
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Failed to check working directory status: {e}")
             return {
@@ -551,14 +555,14 @@ class GitSmartSquashCLI:
     def _display_working_directory_help(self, status_info: Dict[str, Any]):
         """
         Display helpful information about cleaning up the working directory.
-        
+
         Args:
             status_info: Status information from _check_working_directory_clean()
         """
         self.console.print(f"[red]❌ Cannot proceed: {status_info['message']}[/red]")
         self.console.print("[yellow]Git Smart Squash requires a clean working directory to operate safely.[/yellow]")
         self.console.print("")
-        
+
         if status_info['staged_files']:
             self.console.print("[bold]Staged files (ready to commit):[/bold]")
             for file_path in status_info['staged_files'][:10]:  # Limit display
@@ -570,7 +574,7 @@ class GitSmartSquashCLI:
             self.console.print("[dim]  • Commit them: git commit -m \"Your message\"[/dim]")
             self.console.print("[dim]  • Unstage them: git reset HEAD[/dim]")
             self.console.print("")
-        
+
         if status_info['unstaged_files']:
             self.console.print("[bold]Modified files (unstaged):[/bold]")
             for file_path in status_info['unstaged_files'][:10]:  # Limit display
@@ -583,7 +587,7 @@ class GitSmartSquashCLI:
             self.console.print("[dim]  • Stash them: git stash[/dim]")
             self.console.print("[dim]  • Discard them: git checkout .[/dim]")
             self.console.print("")
-        
+
         if status_info['untracked_files']:
             self.console.print("[bold]Untracked files:[/bold]")
             for file_path in status_info['untracked_files'][:10]:  # Limit display
@@ -596,7 +600,7 @@ class GitSmartSquashCLI:
             self.console.print("[dim]  • Remove them: rm <filename> (be careful!)[/dim]")
             self.console.print("[dim]  • Ignore them: add to .gitignore[/dim]")
             self.console.print("")
-        
+
         self.console.print("[green]💡 Once your working directory is clean, run git-smart-squash again.[/green]")
 
     def _apply_commits_with_backup(self, commit_plan: Dict[str, Any], hunks: List[Hunk], full_diff: str, base_branch: str, no_attribution: bool, progress, backup_branch: str):
