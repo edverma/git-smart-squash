@@ -20,7 +20,7 @@ class HunkConfig:
     """Hunk-based grouping configuration."""
     show_hunk_context: bool = True
     context_lines: int = 3
-    max_hunks_per_prompt: int = 100
+    max_hunks_per_prompt: int = 1000
 
 
 @dataclass
@@ -100,7 +100,7 @@ class ConfigManager:
         hunk_config = HunkConfig(
             show_hunk_context=hunk_config_data.get('show_hunk_context', True),
             context_lines=hunk_config_data.get('context_lines', 3),
-            max_hunks_per_prompt=hunk_config_data.get('max_hunks_per_prompt', 100)
+            max_hunks_per_prompt=hunk_config_data.get('max_hunks_per_prompt', 1000)
         )
 
         # Load attribution configuration
@@ -128,7 +128,7 @@ class ConfigManager:
             'hunks': {
                 'show_hunk_context': True,
                 'context_lines': 3,
-                'max_hunks_per_prompt': 100
+                'max_hunks_per_prompt': 1000
             },
             'attribution': {
                 'enabled': True
