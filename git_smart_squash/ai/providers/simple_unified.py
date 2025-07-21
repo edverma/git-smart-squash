@@ -275,17 +275,10 @@ class UnifiedAIProvider:
             
             client = openai.OpenAI(api_key=api_key)
             
-            # Use dynamic max_tokens, ensuring total doesn't exceed context limit
-            max_response_tokens = min(
-                params["response_tokens"], 
-                self.MAX_PREDICT_TOKENS,
-                model_context_limit - params["prompt_tokens"] - 100  # Safety buffer
-            )
-            
             response = client.chat.completions.create(
                 model=self.config.ai.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_response_tokens,
+                max_tokens=self.MAX_PREDICT_TOKENS,
                 temperature=0.7,
                 response_format={
                     "type": "json_schema",
@@ -299,7 +292,7 @@ class UnifiedAIProvider:
             
             # Check if response was truncated
             if response.choices[0].finish_reason == "length":
-                logger.warning(f"OpenAI response truncated at {max_response_tokens} tokens. Consider reducing diff size.")
+                logger.warning(f"OpenAI response truncated at {self.MAX_PREDICT_TOKENS} tokens. Consider reducing diff size.")
             
             # Return the full structured response
             content = response.choices[0].message.content
@@ -335,13 +328,6 @@ class UnifiedAIProvider:
             
             client = anthropic.Anthropic(api_key=api_key)
             
-            # Use dynamic max_tokens, ensuring total doesn't exceed context limit
-            max_response_tokens = min(
-                params["response_tokens"], 
-                self.MAX_PREDICT_TOKENS,
-                model_context_limit - params["prompt_tokens"] - 1000  # Safety buffer
-            )
-            
             # Use tool-based structured output for reliable JSON
             tools = [{
                 "name": "commit_organizer",
@@ -351,7 +337,7 @@ class UnifiedAIProvider:
             
             response = client.messages.create(
                 model=self.config.ai.model,
-                max_tokens=max_response_tokens,
+                max_tokens=self.MAX_PREDICT_TOKENS,
                 tools=tools,
                 tool_choice={"type": "tool", "name": "commit_organizer"},
                 messages=[{"role": "user", "content": prompt}]
@@ -402,16 +388,10 @@ class UnifiedAIProvider:
             # Create the model
             model = genai.GenerativeModel(self.config.ai.model)
             
-            max_response_tokens = min(
-                params["response_tokens"], 
-                self.MAX_PREDICT_TOKENS,
-                model_context_limit - params["prompt_tokens"] - 1000  # Safety buffer
-            )
-            
             # Configure generation with JSON mode for structured output
             generation_config = genai.types.GenerationConfig(
                 candidate_count=1,
-                max_output_tokens=max_response_tokens,
+                max_output_tokens=self.MAX_PREDICT_TOKENS,
                 temperature=0.1,  # Lower temperature for more structured output
                 top_p=0.95,       # Higher top_p for better instruction following
                 top_k=20,         # Lower top_k for more focused responses
