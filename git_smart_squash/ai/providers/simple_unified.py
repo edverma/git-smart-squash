@@ -273,12 +273,23 @@ class UnifiedAIProvider:
             if params["prompt_tokens"] > model_context_limit * 0.7:
                 logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
+            # Configure client with sane timeouts to avoid hanging
+            request_timeout = int(os.getenv('GIT_SMART_SQUASH_AI_TIMEOUT', '300'))
+            max_retries = int(os.getenv('GIT_SMART_SQUASH_AI_MAX_RETRIES', '1'))
+
             client = openai.OpenAI(api_key=api_key)
-            
-            response = client.chat.completions.create(
+            try:
+                # Prefer per-client options when SDK supports it
+                client = client.with_options(timeout=request_timeout, max_retries=max_retries)
+            except Exception:
+                pass
+
+            # Use Responses API for all OpenAI models
+            response_token_cap = min(self.MAX_PREDICT_TOKENS, params.get('response_tokens', self.MAX_PREDICT_TOKENS))
+            response = client.responses.create(
                 model=self.config.ai.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=self.MAX_PREDICT_TOKENS,
+                input=prompt,
+                max_completion_tokens=response_token_cap,
                 temperature=0.7,
                 response_format={
                     "type": "json_schema",
@@ -287,16 +298,35 @@ class UnifiedAIProvider:
                         "schema": self.COMMIT_SCHEMA,
                         "strict": True
                     }
-                }
+                },
+                timeout=request_timeout
             )
-            
-            # Check if response was truncated
-            if response.choices[0].finish_reason == "length":
-                logger.warning(f"OpenAI response truncated at {self.MAX_PREDICT_TOKENS} tokens. Consider reducing diff size.")
-            
-            # Return the full structured response
-            content = response.choices[0].message.content
-            return content  # OpenAI already returns the correct format with json_schema
+
+            # Extract content from Responses API, preferring text
+            try:
+                if hasattr(response, 'output_text'):
+                    return response.output_text
+            except Exception:
+                pass
+
+            try:
+                if hasattr(response, 'output') and response.output and hasattr(response.output[0], 'content'):
+                    for part in response.output[0].content:
+                        if getattr(part, 'type', '') == 'output_text' and hasattr(part, 'text'):
+                            return part.text
+                        if getattr(part, 'type', '') == 'text' and hasattr(part, 'text'):
+                            return part.text
+            except Exception:
+                pass
+
+            # Last resort: attempt to find content in top-level structure
+            if hasattr(response, 'choices') and response.choices:
+                msg = getattr(response.choices[0], 'message', None)
+                if msg and hasattr(msg, 'content'):
+                    return msg.content
+
+            # Fallback to serialized response
+            return json.dumps(response) if not isinstance(response, str) else response
             
         except ImportError:
             raise Exception("OpenAI library not installed. Run: pip install openai")

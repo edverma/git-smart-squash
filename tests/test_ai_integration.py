@@ -899,9 +899,9 @@ class TestProviderSpecificErrorHandling(unittest.TestCase):
                 mock_client = MagicMock()
                 mock_openai.return_value = mock_client
 
-                # Simulate rate limit error
+                # Simulate rate limit error on Responses API
                 from openai import RateLimitError
-                mock_client.chat.completions.create.side_effect = RateLimitError(
+                mock_client.responses.create.side_effect = RateLimitError(
                     message="Rate limit exceeded",
                     response=MagicMock(),
                     body={}
