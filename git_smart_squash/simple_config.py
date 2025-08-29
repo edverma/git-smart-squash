@@ -52,6 +52,7 @@ class ConfigManager:
             'openai': 'gpt-4.1',
             'anthropic': 'claude-sonnet-4-20250514',  # Claude Sonnet 4 model
             'gemini': 'gemini-2.5-pro'  # Gemini 2.5 Pro model
+            'openrouter': 'openai/gpt-5'  # OpenAI GPT-5 model
         }
         return defaults.get(provider, 'devstral')
 

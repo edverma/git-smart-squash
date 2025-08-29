@@ -17,7 +17,8 @@ class UnifiedAIProvider:
         'local': 32000,       # Ollama hard maximum
         'openai': 1000000,    # OpenAI hard maximum (1M tokens)
         'gemini': 1000000,    # Gemini hard maximum (1M tokens)
-        'anthropic': 200000   # Anthropic hard maximum (200k tokens)
+        'anthropic': 200000,  # Anthropic hard maximum (200k tokens)
+        'openrouter': 1000000 # OpenRouter hard maximum (1M tokens)
     }
     
     # Conservative defaults
@@ -177,6 +178,8 @@ class UnifiedAIProvider:
             return self._generate_anthropic(prompt)
         elif self.provider_type == "gemini":
             return self._generate_gemini(prompt)
+        elif self.provider_type == "openrouter":
+            return self._generate_openrouter(prompt)
         else:
             raise ValueError(f"Unsupported provider: {self.provider_type}")
     
@@ -440,3 +443,60 @@ class UnifiedAIProvider:
             raise Exception("Google Generative AI library not installed. Run: pip install google-generativeai")
         except Exception as e:
             raise Exception(f"Google Gemini generation failed: {e}")
+
+    
+    def _generate_openrouter(self, prompt: str) -> str:
+        """Generate using OpenRouter API with structured output enforcement."""
+        try:
+            import openai
+            
+            api_key = os.getenv('OPENROUTER_API_KEY')
+            if not api_key:
+                raise Exception("OPENROUTER_API_KEY environment variable not set")
+            
+            # Calculate dynamic parameters
+            params = self._calculate_dynamic_params(prompt)
+            
+            # Use provider-level context limit
+            model_context_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('openrouter', 1000000)
+            
+            # Check if prompt exceeds model context limit
+            if params["prompt_tokens"] > model_context_limit - 1000:  # Reserve 1000 for response
+                raise Exception(f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size.")
+            
+            # Warn if prompt is large but manageable
+            if params["prompt_tokens"] > model_context_limit * 0.7:
+                logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
+            
+            client = openai.OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key
+            )
+            
+            response = client.chat.completions.create(
+                model=self.config.ai.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=self.MAX_PREDICT_TOKENS,
+                temperature=0.7,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "commit_plan",
+                        "schema": self.COMMIT_SCHEMA,
+                        "strict": True
+                    }
+                }
+            )
+            
+            # Check if response was truncated
+            if response.choices[0].finish_reason == "length":
+                logger.warning(f"OpenAI response truncated at {self.MAX_PREDICT_TOKENS} tokens. Consider reducing diff size.")
+            
+            # Return the full structured response
+            content = response.choices[0].message.content
+            return content  # OpenAI already returns the correct format with json_schema
+            
+        except ImportError:
+            raise Exception("OpenAI library not installed. Run: pip install openai")
+        except Exception as e:
+            raise Exception(f"OpenAI generation failed: {e}")

@@ -144,7 +144,7 @@ git-smart-squash [OPTIONS]
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
 | `--base BASE` | | Base branch to compare against | Config file or `main` |
-| `--ai-provider PROVIDER` | | AI provider to use (`local`, `openai`, `anthropic`, `gemini`) | Config file or `local` |
+| `--ai-provider PROVIDER` | | AI provider to use (`local`, `openai`, `anthropic`, `gemini`, `openrouter`) | Config file or `local` |
 | `--model MODEL` | | Specific model to use | Provider default |
 | `--config PATH` | | Path to configuration file | Auto-detected |
 | `--auto-apply` | | Apply changes without confirmation prompt | Config file or `false` |
@@ -269,6 +269,29 @@ export GEMINI_API_KEY="..."
 
 **Pricing:** ~$0.01 per typical use
 
+### OpenRouter
+
+**Advantages:**
+- Access to 100+ models from multiple providers through a single API
+- Competitive pricing with flexible model selection
+- Unified interface for various AI providers
+- Fast response times with global infrastructure
+- No vendor lock-in - switch models easily
+
+**Setup:**
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+```
+
+**Models:**
+- `openai/gpt-5` (default) - Latest GPT-5 model with excellent performance
+- `anthropic/claude-3.5-sonnet` - Claude Sonnet through OpenRouter
+- `google/gemini-pro-1.5` - Gemini Pro through OpenRouter
+- `meta-llama/llama-3.1-405b-instruct` - Llama 3.1 through OpenRouter
+- Any other model available on OpenRouter - Specify with `--model` flag
+
+**Pricing:** Variable based on selected model (~$0.005 - $0.03 per typical use)
+
 ## Configuration
 
 ### Configuration Hierarchy
@@ -284,7 +307,7 @@ Git Smart Squash looks for configuration in this order:
 ```yaml
 # AI Provider Settings
 ai:
-  provider: local  # or openai, anthropic, gemini
+  provider: local  # or openai, anthropic, gemini, openrouter
   model: devstral  # optional, uses provider default if not set
                    # You can specify ANY model supported by the provider
   instructions: |  # Optional custom instructions for AI
@@ -316,6 +339,7 @@ auto_apply: false  # Set to true to apply commits without confirmation
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `GEMINI_API_KEY` | Google Gemini API key |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
 | `OLLAMA_HOST` | Ollama server URL (default: http://localhost:11434) |
 
 ## How It Works
@@ -404,6 +428,11 @@ git-smart-squash --ai-provider anthropic --model claude-3-haiku-20240307
 # Gemini examples
 git-smart-squash --ai-provider gemini --model gemini-1.5-flash
 git-smart-squash --ai-provider gemini --model gemini-ultra
+
+# OpenRouter examples
+git-smart-squash --ai-provider openrouter --model openai/gpt-5
+git-smart-squash --ai-provider openrouter --model anthropic/claude-3.5-sonnet
+git-smart-squash --ai-provider openrouter --model google/gemini-pro-1.5
 
 # Local Ollama examples
 git-smart-squash --model codellama:13b
