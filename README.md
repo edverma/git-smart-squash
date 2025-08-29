@@ -54,6 +54,12 @@ export ANTHROPIC_API_KEY="your-key"
 export GEMINI_API_KEY="your-key"
 ```
 
+**Option C: OpenRouter (100+ models)**
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-your-key"
+# Then run with: git-smart-squash --ai-provider openrouter
+```
+
 ### 3. Run
 
 ```bash
@@ -68,7 +74,7 @@ That's it. Review the plan and approve.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `--base` | Base branch to compare against | Config file or `main` |
-| `--ai-provider` | AI provider to use (openai, anthropic, local, gemini) | Configured in settings |
+| `--ai-provider` | AI provider to use (openai, anthropic, local, gemini, openrouter) | Configured in settings |
 | `--model` | Specific AI model to use (see recommended models below) | Provider default |
 | `--config` | Path to custom configuration file | `.git-smart-squash.yml` or `~/.git-smart-squash.yml` |
 | `--auto-apply` | Apply commit plan without confirmation prompt | `false` |
@@ -82,6 +88,7 @@ That's it. Review the plan and approve.
 - **OpenAI**: `gpt-4.1` (default)
 - **Anthropic**: `claude-sonnet-4-20250514` (default)
 - **Gemini**: `gemini-2.5-pro` (default)
+- **OpenRouter**: `openai/gpt-5` (default)
 - **Local/Ollama**: `devstral` (default)
 
 ### Model Selection
@@ -91,6 +98,10 @@ git-smart-squash --ai-provider openai --model gpt-4.1-mini
 
 # For local Ollama
 git-smart-squash --ai-provider local --model llama-3.1
+
+# For OpenRouter (access to 100+ models)
+git-smart-squash --ai-provider openrouter --model openai/gpt-5
+git-smart-squash --ai-provider openrouter --model anthropic/claude-3.5-sonnet
 ```
 
 ## Custom Instructions
@@ -130,6 +141,7 @@ git-smart-squash --base develop
 ### "I want to use a specific AI provider"
 ```bash
 git-smart-squash --ai-provider openai
+git-smart-squash --ai-provider openrouter  # Access to 100+ models
 ```
 
 ## Safety
@@ -157,6 +169,7 @@ git reset --hard your-branch-backup-[timestamp]
 | **OpenAI** | ~$0.01 | Cloud |
 | **Anthropic** | ~$0.01 | Cloud |
 | **Gemini** | ~$0.01 | Cloud |
+| **OpenRouter** | ~$0.005-$0.03 | Cloud |
 
 ## Advanced Configuration (Optional)
 
