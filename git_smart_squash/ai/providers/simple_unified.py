@@ -285,12 +285,9 @@ class UnifiedAIProvider:
 
             client = openai.OpenAI(api_key=api_key)
 
-            # Map reasoning effort (pass only if provided)
+            # Map reasoning effort (pass through all valid values, including 'minimal')
             reasoning = self.config.ai.reasoning
-            if reasoning and reasoning != 'minimal':
-                reasoning_param = {"effort": reasoning}
-            else:
-                reasoning_param = None
+            reasoning_param = {"effort": reasoning} if reasoning else None
 
             # Build the request parameters for responses API
             response_params = {

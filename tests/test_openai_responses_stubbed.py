@@ -73,9 +73,9 @@ class TestOpenAIResponsesStubbed(unittest.TestCase):
         result = self.provider._generate_openai('hello world')
         parsed = json.loads(result)
         self.assertIn('commits', parsed)
-        # Ensure reasoning param is omitted when minimal
+        # Ensure reasoning param is passed through even when minimal
         params = self.captured['params']
-        self.assertTrue('reasoning' not in params)
+        self.assertEqual(params.get('reasoning'), {'effort': 'minimal'})
 
 
 if __name__ == '__main__':
