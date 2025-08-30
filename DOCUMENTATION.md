@@ -151,6 +151,8 @@ git-smart-squash [OPTIONS]
 | `--instructions TEXT` | `-i` | Custom instructions for AI | Config file or none |
 | `--no-attribution` | | Disable attribution message in commits | Config file or `false` |
 | `--debug` | | Enable debug logging for detailed hunk application info | `false` |
+| `--reasoning` | | Reasoning effort level for GPT-5 models (high, medium, low, minimal) | `low` |
+| `--max-predict-tokens` | | Maximum tokens for completion/output | `200000` |
 
 ### Examples
 
@@ -168,10 +170,15 @@ git-smart-squash -i "Group database changes separately from API changes"
 git-smart-squash --ai-provider anthropic --model claude-3-opus-20240229
 
 # Use any custom model
-git-smart-squash --ai-provider openai --model gpt-4-turbo-preview
+git-smart-squash --ai-provider openai --model gpt-5
 git-smart-squash --ai-provider anthropic --model claude-3-haiku-20240307
 git-smart-squash --ai-provider gemini --model gemini-1.5-flash
 git-smart-squash --model llama3:70b  # For local Ollama
+
+# Adjust reasoning effort for GPT-5 models (default: low)
+git-smart-squash --ai-provider openai --reasoning high  # Most thorough analysis
+git-smart-squash --ai-provider openai --reasoning medium  # Balanced speed/quality
+git-smart-squash --ai-provider openai --reasoning minimal  # Quickest, basic analysis
 
 # Disable attribution message
 git-smart-squash --no-attribution
@@ -210,9 +217,11 @@ ollama pull devstral
 ### OpenAI
 
 **Advantages:**
-- High-quality results
-- Large context window (1M tokens / ~4M characters)
+- High-quality results with advanced reasoning
+- Large context window (400k tokens / ~1.6M characters)
 - Fast response times
+- High reasoning capability for complex code understanding
+- Uses OpenAI Responses API exclusively
 
 **Setup:**
 ```bash
@@ -220,11 +229,11 @@ export OPENAI_API_KEY="sk-..."
 ```
 
 **Models:**
-- `gpt-4.1` (default) - Latest model with best quality
-- `gpt-4o` - Previous generation, still very capable
-- `gpt-4o-mini` - Faster and more economical
-- `o1`, `o3` - Advanced reasoning models for complex reorganizations
-- Any other OpenAI model - Specify with `--model` flag
+- `gpt-5` (default) - Latest model with high reasoning for complex code understanding
+- `gpt-5-mini` - Faster, lightweight version with high reasoning capabilities
+- `gpt-5-nano` - Ultra-fast, economical model for simpler reorganizations
+
+**Note:** Only GPT-5 models are supported. All GPT-5 models use the OpenAI Responses API with high reasoning capability.
 
 **Pricing:** ~$0.01 per typical use
 
@@ -287,6 +296,8 @@ ai:
   provider: local  # or openai, anthropic, gemini
   model: devstral  # optional, uses provider default if not set
                    # You can specify ANY model supported by the provider
+  reasoning: low   # For GPT-5: high, medium, low, or minimal (default: low)
+  max_predict_tokens: 200000  # Maximum output tokens (default: 200000)
   instructions: |  # Optional custom instructions for AI
     Always group database migrations separately.
     Keep test changes in their own commits.
@@ -394,8 +405,8 @@ Git Smart Squash supports ANY model offered by the configured AI provider. Simpl
 
 ```bash
 # OpenAI examples
-git-smart-squash --ai-provider openai --model gpt-3.5-turbo
-git-smart-squash --ai-provider openai --model gpt-4-turbo-preview
+git-smart-squash --ai-provider openai --model gpt-5-mini
+git-smart-squash --ai-provider openai --model gpt-5
 
 # Anthropic examples
 git-smart-squash --ai-provider anthropic --model claude-instant-1.2
@@ -600,7 +611,7 @@ source ~/.bashrc
    ```
 2. Use faster model:
    ```bash
-   git-smart-squash --model gpt-4o-mini
+   git-smart-squash --model gpt-5-nano
    ```
 
 #### "Operation failed - automatic restoration"

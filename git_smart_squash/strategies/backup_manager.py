@@ -30,14 +30,8 @@ class BackupManager:
             Exception: If backup creation fails
         """
         try:
-            # Verify working directory is clean before creating backup
-            status_result = subprocess.run(
-                ['git', 'status', '--porcelain'],
-                capture_output=True, text=True, check=True
-            )
-            
-            if status_result.stdout.strip():
-                raise Exception("Working directory is not clean - backup would not preserve uncommitted changes")
+            # Working directory cleanliness is validated by the caller (CLI)
+            # Always proceed to create a backup to preserve current state
             
             # Get current branch name
             result = subprocess.run(

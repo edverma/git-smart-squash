@@ -81,7 +81,7 @@ class TestAllProvidersTokenLimits(unittest.TestCase):
         # Test configurations for all providers
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
+            'openai': Config(ai=AIConfig(provider='openai', model='gpt-5'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
@@ -185,7 +185,7 @@ class TestAllProvidersRealResponses(unittest.TestCase):
         # Test configurations for all providers
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
+            'openai': Config(ai=AIConfig(provider='openai', model='gpt-5'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
@@ -576,7 +576,7 @@ class TestAllProvidersIntegrationWithCLI(unittest.TestCase):
         # Test configurations for all providers
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
+            'openai': Config(ai=AIConfig(provider='openai', model='gpt-5'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
@@ -764,7 +764,7 @@ class TestStructuredOutputValidation(unittest.TestCase):
     def setUp(self):
         self.providers = {
             'local': Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
-            'openai': Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
+            'openai': Config(ai=AIConfig(provider='openai', model='gpt-5'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'anthropic': Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False),
             'gemini': Config(ai=AIConfig(provider='gemini', model='gemini-2.5-pro'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False)
         }
@@ -889,7 +889,7 @@ class TestProviderSpecificErrorHandling(unittest.TestCase):
 
     def setUp(self):
         self.local_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='local', model='devstral'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False))
-        self.openai_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='openai', model='gpt-4.1'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False))
+        self.openai_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='openai', model='gpt-5'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False))
         self.anthropic_provider = UnifiedAIProvider(Config(ai=AIConfig(provider='anthropic', model='claude-sonnet-4-20250514'), hunks=HunkConfig(), attribution=AttributionConfig(), auto_apply=False))
 
     def test_openai_rate_limit_handling(self):

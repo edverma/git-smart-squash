@@ -3,7 +3,6 @@
 import os
 import subprocess
 import json
-import google.generativeai as genai
 from ...logger import get_logger
 
 logger = get_logger()
@@ -15,14 +14,14 @@ class UnifiedAIProvider:
     # Provider-specific hard maximum context token limits
     PROVIDER_MAX_CONTEXT_TOKENS = {
         'local': 32000,       # Ollama hard maximum
-        'openai': 1000000,    # OpenAI hard maximum (1M tokens)
+        'openai': 400000,     # OpenAI GPT-5 only (400k tokens)
         'gemini': 1000000,    # Gemini hard maximum (1M tokens)
         'anthropic': 200000   # Anthropic hard maximum (200k tokens)
     }
     
     # Conservative defaults
     DEFAULT_MAX_CONTEXT_TOKENS = 32000
-    MAX_PREDICT_TOKENS = 32000
+    MAX_PREDICT_TOKENS = 200000  # Increased for GPT-5 models
     
     # Schema for commit organization JSON structure  
     COMMIT_SCHEMA = {
@@ -130,7 +129,7 @@ class UnifiedAIProvider:
             response_buffer = min(response_buffer, 1000)
         
         # Set prediction tokens based on expected response size
-        response_tokens = min(response_buffer, self.MAX_PREDICT_TOKENS)
+        response_tokens = min(response_buffer, self.config.ai.max_predict_tokens)
         
         return {
             "prompt_tokens": prompt_tokens,
@@ -230,14 +229,15 @@ class UnifiedAIProvider:
             if response.get('done', True) is False:
                 logger.warning(f"Response may have been truncated. Used {ollama_params['num_ctx']} context tokens.")
             
-            # Parse and ensure correct format
+            # Parse and normalize to array format for tests/consumers
             try:
                 parsed = json.loads(response_text)
-                if isinstance(parsed, dict) and "commits" in parsed:
-                    return json.dumps(parsed)  # Return full dict
+                if isinstance(parsed, dict) and "commits" in parsed and isinstance(parsed["commits"], list):
+                    # Always return the commits array as JSON
+                    return json.dumps(parsed["commits"])
                 elif isinstance(parsed, list):
-                    # Wrap list in expected format
-                    return json.dumps({"commits": parsed})
+                    # Already an array of commit objects
+                    return json.dumps(parsed)
                 else:
                     return response_text
             except json.JSONDecodeError:
@@ -251,53 +251,110 @@ class UnifiedAIProvider:
             raise Exception(f"Local AI generation failed: {e}")
     
     def _generate_openai(self, prompt: str) -> str:
-        """Generate using OpenAI API with structured output enforcement."""
+        """Generate using OpenAI Responses API with GPT-5 models only."""
         try:
             import openai
-            
+
             api_key = os.getenv('OPENAI_API_KEY')
             if not api_key:
                 raise Exception("OPENAI_API_KEY environment variable not set")
-            
+
+            # Validate model is GPT-5
+            if not self.config.ai.model.startswith('gpt-5'):
+                raise Exception(
+                    f"Model {self.config.ai.model} is not supported. Only GPT-5 models (gpt-5, gpt-5-mini, gpt-5-nano) are supported."
+                )
+
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
-            
-            # Use provider-level context limit
-            model_context_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('openai', 1000000)
-            
+
+            # GPT-5 context limit is 400k tokens
+            model_context_limit = 400000
+
             # Check if prompt exceeds model context limit
             if params["prompt_tokens"] > model_context_limit - 1000:  # Reserve 1000 for response
-                raise Exception(f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size.")
-            
+                raise Exception(
+                    f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size."
+                )
+
             # Warn if prompt is large but manageable
             if params["prompt_tokens"] > model_context_limit * 0.7:
-                logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
-            
+                logger.warning(
+                    f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit."
+                )
+
             client = openai.OpenAI(api_key=api_key)
-            
-            response = client.chat.completions.create(
-                model=self.config.ai.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=self.MAX_PREDICT_TOKENS,
-                temperature=0.7,
-                response_format={
+
+            # Check if responses API is available
+            if not hasattr(client, 'responses'):
+                raise Exception(
+                    "OpenAI responses API not available. Please update the OpenAI library: pip install --upgrade openai"
+                )
+
+            # Map reasoning effort (pass only if provided)
+            reasoning = self.config.ai.reasoning
+            if reasoning and reasoning != 'minimal':
+                reasoning_param = {"effort": reasoning}
+            else:
+                reasoning_param = None
+
+            # Build the request parameters for responses API
+            response_params = {
+                "model": self.config.ai.model,
+                # Responses API expects `input` for text input
+                "input": prompt,
+                # Use dynamically calculated response tokens within our cap
+                "max_output_tokens": params.get("response_tokens", self.config.ai.max_predict_tokens),
+                # Enforce structured JSON output
+                "response_format": {
                     "type": "json_schema",
                     "json_schema": {
                         "name": "commit_plan",
                         "schema": self.COMMIT_SCHEMA,
-                        "strict": True
-                    }
-                }
-            )
-            
-            # Check if response was truncated
-            if response.choices[0].finish_reason == "length":
-                logger.warning(f"OpenAI response truncated at {self.MAX_PREDICT_TOKENS} tokens. Consider reducing diff size.")
-            
-            # Return the full structured response
-            content = response.choices[0].message.content
-            return content  # OpenAI already returns the correct format with json_schema
-            
+                        "strict": True,
+                    },
+                },
+            }
+            if reasoning_param is not None:
+                response_params["reasoning"] = reasoning_param
+
+            # Call the responses API
+            try:
+                response = client.responses.create(**response_params)
+                logger.debug(
+                    f"Successfully used responses API for {self.config.ai.model} with {self.config.ai.reasoning} reasoning"
+                )
+            except Exception as e:
+                raise Exception(f"OpenAI responses API call failed: {e}")
+
+            # If the SDK exposes output_text, prefer it; otherwise fall back safely
+            try:
+                content = getattr(response, "output_text", None)
+                if not content:
+                    # Fallback to extracting from output structure
+                    # response.output is a list of Output objects with .content
+                    if hasattr(response, "output") and response.output:
+                        first = response.output[0]
+                        if hasattr(first, "content") and first.content:
+                            # Each content item may be text/json parts
+                            part = first.content[0]
+                            # Try common attributes
+                            text = getattr(part, "text", None) or getattr(part, "content", None)
+                            content = text if isinstance(text, str) else None
+                if not content:
+                    # As a last resort, try choices/message shape (older clients)
+                    if hasattr(response, "choices") and response.choices:
+                        choice0 = response.choices[0]
+                        msg = getattr(choice0, "message", None)
+                        content = getattr(msg, "content", None) if msg else None
+            except Exception:
+                content = None
+
+            if not content:
+                raise Exception("Failed to extract content from OpenAI response")
+
+            return content  # JSON string per json_schema enforcement
+
         except ImportError:
             raise Exception("OpenAI library not installed. Run: pip install openai")
         except Exception as e:
@@ -337,7 +394,7 @@ class UnifiedAIProvider:
             
             response = client.messages.create(
                 model=self.config.ai.model,
-                max_tokens=self.MAX_PREDICT_TOKENS,
+                max_tokens=self.config.ai.max_predict_tokens,
                 tools=tools,
                 tool_choice={"type": "tool", "name": "commit_organizer"},
                 messages=[{"role": "user", "content": prompt}]
@@ -364,6 +421,7 @@ class UnifiedAIProvider:
     def _generate_gemini(self, prompt: str) -> str:
         """Generate using Google Gemini API with structured output enforcement."""
         try:
+            import google.generativeai as genai
             api_key = os.getenv('GEMINI_API_KEY')
             if not api_key:
                 raise Exception("GEMINI_API_KEY environment variable not set")
@@ -391,7 +449,7 @@ class UnifiedAIProvider:
             # Configure generation with JSON mode for structured output
             generation_config = genai.types.GenerationConfig(
                 candidate_count=1,
-                max_output_tokens=self.MAX_PREDICT_TOKENS,
+                max_output_tokens=self.config.ai.max_predict_tokens,
                 temperature=0.1,  # Lower temperature for more structured output
                 top_p=0.95,       # Higher top_p for better instruction following
                 top_k=20,         # Lower top_k for more focused responses
@@ -411,6 +469,7 @@ class UnifiedAIProvider:
             
             # Check if response was truncated
             if response.candidates[0].finish_reason.name == 'MAX_TOKENS':
+                max_response_tokens = params.get("response_tokens", self.config.ai.max_predict_tokens)
                 raise Exception(f"Gemini response truncated at {max_response_tokens} tokens. Consider reducing diff size or using a model with larger context window.")
             
             # Check if response has no valid parts

@@ -13,6 +13,8 @@ class AIConfig:
     model: str = "devstral"
     api_key_env: Optional[str] = None
     instructions: Optional[str] = None
+    reasoning: str = "low"  # Reasoning effort level for GPT-5 models (default: low)
+    max_predict_tokens: int = 200000  # Maximum tokens for completion/output (default: 200k)
 
 
 @dataclass
@@ -49,7 +51,7 @@ class ConfigManager:
         """Get the default model for a given provider."""
         defaults = {
             'local': 'devstral',
-            'openai': 'gpt-4.1',
+            'openai': 'gpt-5',  # GPT-5 with high reasoning capability
             'anthropic': 'claude-sonnet-4-20250514',  # Claude Sonnet 4 model
             'gemini': 'gemini-2.5-pro'  # Gemini 2.5 Pro model
         }
@@ -92,7 +94,9 @@ class ConfigManager:
             provider=provider,
             model=model,
             api_key_env=config_data.get('ai', {}).get('api_key_env'),
-            instructions=config_data.get('ai', {}).get('instructions')
+            instructions=config_data.get('ai', {}).get('instructions'),
+            reasoning=config_data.get('ai', {}).get('reasoning', 'low'),
+            max_predict_tokens=config_data.get('ai', {}).get('max_predict_tokens', 200000)
         )
 
         # Load hunk configuration

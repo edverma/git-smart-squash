@@ -110,7 +110,7 @@ index 0000000..3456789
             config_data = {
                 'ai': {
                     'provider': 'openai',
-                    'model': 'gpt-4.1',
+                    'model': 'gpt-5',
                     'instructions': 'Always separate infrastructure changes'
                 },
                 'hunks': {
@@ -136,7 +136,7 @@ index 0000000..3456789
         config = Config(
             ai=AIConfig(
                 provider='openai',
-                model='gpt-4.1',
+                model='gpt-5',
                 instructions='Default instructions from config'
             ),
             hunks=HunkConfig(),
@@ -172,7 +172,7 @@ index 0000000..3456789
     def test_instructions_passed_to_ai_provider(self):
         """Test that instructions are correctly passed through to AI provider."""
         config = Config(
-            ai=AIConfig(provider='openai', model='gpt-4.1'),
+            ai=AIConfig(provider='openai', model='gpt-5'),
             hunks=HunkConfig(),
             attribution=AttributionConfig(),
             auto_apply=False
