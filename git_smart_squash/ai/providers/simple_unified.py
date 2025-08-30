@@ -285,12 +285,6 @@ class UnifiedAIProvider:
 
             client = openai.OpenAI(api_key=api_key)
 
-            # Check if responses API is available
-            if not hasattr(client, 'responses'):
-                raise Exception(
-                    "OpenAI responses API not available. Please update the OpenAI library: pip install --upgrade openai"
-                )
-
             # Map reasoning effort (pass only if provided)
             reasoning = self.config.ai.reasoning
             if reasoning and reasoning != 'minimal':
