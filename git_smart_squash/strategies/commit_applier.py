@@ -101,4 +101,6 @@ def apply_commit_plan(cli, commit_plan, hunks, full_diff: str, base_branch: str,
             cli.console.print(f"[dim]   Your repository is now back to its original state.[/dim]")
             cli.console.print(f"[dim]   You can examine the backup branch to understand what was attempted.[/dim]")
             cli.console.print(f"[dim]   To delete the backup when done: git branch -D {backup_manager.backup_branch}[/dim]")
-        raise
+        # Exit with non-zero code to match CLI behavior expected by tests
+        import sys
+        sys.exit(1)
