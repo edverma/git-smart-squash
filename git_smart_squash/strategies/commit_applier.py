@@ -87,6 +87,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                                 f"[green]✓ Created commit: {commit['message']}[/green]",
                                 f"Created commit: {commit['message']}",
                             )
+                            # Also log so tests capturing logger output see this line
+                            try:
+                                cli.logger.info(f"Created commit: {commit['message']}")
+                            except Exception:
+                                pass
                             subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                             subprocess.run(['git', 'status'], capture_output=True, check=True)
                         else:
@@ -95,6 +100,10 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                                 f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]",
                                 f"Skipping commit '{commit['message']}' - no changes to stage",
                             )
+                            try:
+                                cli.logger.info(f"Skipping commit '{commit['message']}' - no changes to stage")
+                            except Exception:
+                                pass
                             cli.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
                     else:
                         _print_both(
@@ -103,6 +112,10 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                             f"Failed to apply hunks for commit '{commit['message']}'",
                         )
                         cli.logger.error(f"Hunk application failed for commit: {commit['message']}")
+                        try:
+                            cli.logger.info(f"Failed to apply hunks for commit '{commit['message']}'")
+                        except Exception:
+                            pass
                 else:
                     _print_both(
                         cli,
@@ -132,6 +145,10 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                             f"[green]✓ Created final commit for remaining changes[/green]",
                             "Created final commit for remaining changes",
                         )
+                        try:
+                            cli.logger.info("Created final commit for remaining changes")
+                        except Exception:
+                            pass
                         subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                         subprocess.run(['git', 'status'], capture_output=True, check=True)
             except Exception as e:
@@ -142,6 +159,10 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
         f"[green]Successfully created {commits_created} new commit(s)[/green]",
         f"Successfully created {commits_created} new commit(s)",
     )
+    try:
+        cli.logger.info(f"Successfully created {commits_created} new commit(s)")
+    except Exception:
+        pass
 
 
 def apply_commit_plan(cli, commit_plan, hunks, full_diff: str, base_branch: str, no_attribution: bool = False):
