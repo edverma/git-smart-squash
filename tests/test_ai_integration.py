@@ -33,6 +33,10 @@ from git_smart_squash.ai.providers.simple_unified import UnifiedAIProvider
 TEST_NO_LOCAL = False
 TEST_CLOUD_ONLY = False
 
+# Do not run real provider response tests by default to avoid long network calls
+# Enable by setting RUN_AI_REAL=1 in the environment
+RUN_AI_REAL = os.getenv('RUN_AI_REAL') == '1'
+
 
 class TestOllamaServerAvailability(unittest.TestCase):
     """Test that Ollama server is available and working."""
@@ -178,6 +182,7 @@ class TestAllProvidersTokenLimits(unittest.TestCase):
                     self.assertLessEqual(ollama_params['num_predict'], provider.MAX_PREDICT_TOKENS)
 
 
+@unittest.skipUnless(RUN_AI_REAL, "Set RUN_AI_REAL=1 to run real provider tests")
 class TestAllProvidersRealResponses(unittest.TestCase):
     """Test real AI responses for commit organization across all providers."""
 
@@ -564,6 +569,7 @@ Here's the diff:
                         self.fail(f"{provider_name} large diff test failed unexpectedly: {e}")
 
 
+@unittest.skipUnless(RUN_AI_REAL, "Set RUN_AI_REAL=1 to run real provider tests")
 class TestAllProvidersIntegrationWithCLI(unittest.TestCase):
     """Test integration of all AI providers with the full CLI workflow."""
 
