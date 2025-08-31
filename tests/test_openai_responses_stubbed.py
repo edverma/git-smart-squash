@@ -63,8 +63,11 @@ class TestOpenAIResponsesStubbed(unittest.TestCase):
         self.assertEqual(params.get('model'), 'gpt-5')
         self.assertIn('input', params)
         self.assertIn('max_output_tokens', params)
-        self.assertIn('response_format', params)
-        self.assertIn('json_schema', params['response_format'])
+        # Responses API should get structured outputs via text.format.json_schema
+        self.assertIn('text', params)
+        self.assertIn('format', params['text'])
+        self.assertEqual(params['text']['format'].get('type'), 'json_schema')
+        self.assertIn('schema', params['text']['format'])
         self.assertEqual(params.get('reasoning'), {'effort': 'high'})
 
     def test_minimal_reasoning_omitted(self):

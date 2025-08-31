@@ -289,21 +289,22 @@ class UnifiedAIProvider:
             reasoning = self.config.ai.reasoning
             reasoning_param = {"effort": reasoning} if reasoning else None
 
-            # Build the request parameters for responses API
+            # Build the request parameters for Responses API
+            # Structured outputs for Responses API are configured under text.format
             response_params = {
                 "model": self.config.ai.model,
                 # Responses API expects `input` for text input
                 "input": prompt,
                 # Use dynamically calculated response tokens within our cap
                 "max_output_tokens": params.get("response_tokens", self.config.ai.max_predict_tokens),
-                # Enforce structured JSON output
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
+                # Enforce structured JSON output via Responses API text.format
+                "text": {
+                    "format": {
+                        "type": "json_schema",
                         "name": "commit_plan",
                         "schema": self.COMMIT_SCHEMA,
                         "strict": True,
-                    },
+                    }
                 },
             }
             if reasoning_param is not None:

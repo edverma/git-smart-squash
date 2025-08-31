@@ -1,7 +1,7 @@
 pyyaml>=6.0
 rich>=13.0.0
-# Require Responses API support (introduced in openai>=1.70.0)
-openai>=1.70.0
+# Require Responses API and structured outputs (present in openai>=1.90.0)
+openai>=1.90.0
 anthropic>=0.3.0
 tiktoken>=0.5.0
 google-generativeai>=0.8.5

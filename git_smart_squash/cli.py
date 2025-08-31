@@ -204,7 +204,12 @@ class GitSmartSquashCLI:
             )
 
             if not validation_result.is_valid:
-                # Show the dependencies as debug information only
+                # Show dependency relationships to the user as informational
+                self.console.print("\n[yellow]Dependency relationships detected between hunks (informational):[/yellow]")
+                for error in validation_result.errors:
+                    self.console.print(f"  • {error}")
+                self.console.print("[dim]Dependencies are informational; proceeding with the original plan.[/dim]")
+                # Also log at debug level
                 self.logger.debug("Dependency relationships detected between hunks (informational):")
                 for error in validation_result.errors:
                     self.logger.debug(f"  • {error}")
