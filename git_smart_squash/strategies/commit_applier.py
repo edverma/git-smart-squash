@@ -7,22 +7,20 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .backup_manager import BackupManager
 
 
-def _print_both(cli, rich_text: str, plain_text: str) -> None:
-    """Emit a message via the CLI console and plain stdout for test capture.
+def _emit_and_buffer(cli, rich_text: str, plain_text: str, buffer: List[str]) -> None:
+    """Emit to rich console and stage the plain text for post-progress printing.
 
-    Some tests patch sys.stdout after the CLI's Console is constructed.
-    Duplicating messages to plain stdout ensures assertions can reliably
-    capture key status lines without depending on Console buffering.
+    Rich Progress may temporarily redirect stdout, which can interfere with tests
+    that patch sys.stdout to capture output. To make behavior deterministic,
+    we print to the console immediately for interactive feedback and append the
+    plain-text message to a buffer that is flushed to real stdout after the
+    Progress context exits.
     """
     try:
         cli.console.print(rich_text)
     except Exception:
-        # Fallback to plain text print if console fails
         pass
-    try:
-        print(plain_text)
-    except Exception:
-        pass
+    buffer.append(plain_text)
 
 
 def _resolve_base_ref(base_branch: str) -> str:
@@ -49,7 +47,7 @@ def _resolve_base_ref(base_branch: str) -> str:
     return first_commit or 'HEAD'
 
 
-def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_branch: str, no_attribution: bool, progress, backup_branch: str):
+def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_branch: str, no_attribution: bool, progress, backup_branch: str, stdout_buffer: List[str]):
     """Apply commits with backup context already established. Uses CLI for console/logger/config."""
     # Import from CLI module so tests that patch cli.apply_hunks_with_fallback/reset_staging_area see the calls
     from ..cli import apply_hunks_with_fallback as cli_apply_hunks_with_fallback, reset_staging_area as cli_reset_staging_area
@@ -82,10 +80,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                             subprocess.run(['git', 'commit', '-m', message], check=True)
                             commits_created += 1
                             all_applied_hunk_ids.update(hunk_ids)
-                            _print_both(
+                            _emit_and_buffer(
                                 cli,
                                 f"[green]✓ Created commit: {commit['message']}[/green]",
                                 f"Created commit: {commit['message']}",
+                                stdout_buffer,
                             )
                             # Also log so tests capturing logger output see this line
                             try:
@@ -95,10 +94,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                             subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                             subprocess.run(['git', 'status'], capture_output=True, check=True)
                         else:
-                            _print_both(
+                            _emit_and_buffer(
                                 cli,
                                 f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]",
                                 f"Skipping commit '{commit['message']}' - no changes to stage",
+                                stdout_buffer,
                             )
                             try:
                                 cli.logger.info(f"Skipping commit '{commit['message']}' - no changes to stage")
@@ -106,10 +106,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                                 pass
                             cli.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
                     else:
-                        _print_both(
+                        _emit_and_buffer(
                             cli,
                             f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]",
                             f"Failed to apply hunks for commit '{commit['message']}'",
+                            stdout_buffer,
                         )
                         cli.logger.error(f"Hunk application failed for commit: {commit['message']}")
                         try:
@@ -117,10 +118,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                         except Exception:
                             pass
                 else:
-                    _print_both(
+                    _emit_and_buffer(
                         cli,
                         f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]",
                         f"Skipping commit '{commit['message']}' - no hunks specified",
+                        stdout_buffer,
                     )
                     # Mirror to logger so tests patching stdout via logger capture this line too
                     try:
@@ -145,10 +147,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                         else:
                             full_message = 'chore: remaining uncommitted changes'
                         subprocess.run(['git', 'commit', '-m', full_message], check=True)
-                        _print_both(
+                        _emit_and_buffer(
                             cli,
                             f"[green]✓ Created final commit for remaining changes[/green]",
                             "Created final commit for remaining changes",
+                            stdout_buffer,
                         )
                         try:
                             cli.logger.info("Created final commit for remaining changes")
@@ -159,10 +162,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
             except Exception as e:
                 cli.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
 
-    _print_both(
+    _emit_and_buffer(
         cli,
         f"[green]Successfully created {commits_created} new commit(s)[/green]",
         f"Successfully created {commits_created} new commit(s)",
+        stdout_buffer,
     )
     try:
         cli.logger.info(f"Successfully created {commits_created} new commit(s)")
@@ -174,28 +178,38 @@ def apply_commit_plan(cli, commit_plan, hunks, full_diff: str, base_branch: str,
     """Apply the commit plan using hunk-based staging with automatic backup."""
     backup_manager = BackupManager()
     try:
+        stdout_buffer: List[str] = []
         with backup_manager.backup_context() as backup_branch:
-            # Echo via both console and stdout for reliable test capture
-            _print_both(
+            # Emit to console and stage plain text; flush later post-Progress
+            _emit_and_buffer(
                 cli,
                 f"[green]📦 Created backup branch: {backup_branch}[/green]",
                 f"Created backup branch: {backup_branch}",
+                stdout_buffer,
             )
             cli.console.print(f"[dim]   Your current state is safely backed up before applying changes.[/dim]")
 
             with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=cli.console) as progress:
-                _apply_commits_with_backup(cli, commit_plan, hunks, full_diff, base_branch, no_attribution, progress, backup_branch)
+                _apply_commits_with_backup(cli, commit_plan, hunks, full_diff, base_branch, no_attribution, progress, backup_branch, stdout_buffer)
 
             cli.console.print(f"[green]✓ Operation completed successfully![/green]")
-            # Also mirror backup preservation message to stdout
-            _print_both(
+            # Emit to console and stage plain text; flush later post-Progress
+            _emit_and_buffer(
                 cli,
                 f"[blue]📦 Backup branch created and preserved: {backup_branch}[/blue]",
                 f"Backup branch created and preserved: {backup_branch}",
+                stdout_buffer,
             )
             cli.console.print(f"[dim]   This backup contains your original state before changes were applied.[/dim]")
             cli.console.print(f"[dim]   You can restore it with: git reset --hard {backup_branch}[/dim]")
             cli.console.print(f"[dim]   You can delete it when no longer needed: git branch -D {backup_branch}[/dim]")
+
+        # Now that Progress context has exited, flush buffered lines to real stdout
+        try:
+            for line in stdout_buffer:
+                print(line)
+        except Exception:
+            pass
     except Exception as e:
         cli.console.print(f"[red]❌ Operation failed: {e}[/red]")
         if backup_manager.backup_branch:
