@@ -7,6 +7,30 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .backup_manager import BackupManager
 
 
+def _resolve_base_ref(base_branch: str) -> str:
+    """Resolve a usable base ref, falling back to common alternatives.
+
+    Returns a ref string that exists in the repo; if none found, returns the
+    first commit hash or 'HEAD' as a last resort.
+    """
+    def _exists(ref: str) -> bool:
+        res = subprocess.run(['git', 'rev-parse', '--verify', '--quiet', ref], capture_output=True)
+        return res.returncode == 0
+
+    for cand in [
+        base_branch,
+        f'origin/{base_branch}',
+        'master', 'origin/master',
+        'develop', 'origin/develop',
+    ]:
+        if _exists(cand):
+            return cand
+
+    first = subprocess.run(['git', 'rev-list', '--max-parents=0', 'HEAD'], capture_output=True, text=True)
+    first_commit = first.stdout.strip().splitlines()[0] if first.stdout.strip() else None
+    return first_commit or 'HEAD'
+
+
 def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_branch: str, no_attribution: bool, progress, backup_branch: str):
     """Apply commits with backup context already established. Uses CLI for console/logger/config."""
     # Import from CLI module so tests that patch cli.apply_hunks_with_fallback/reset_staging_area see the calls
@@ -14,7 +38,8 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
     hunks_by_id = {hunk.id: hunk for hunk in hunks}
 
     task = progress.add_task("Resetting to base branch...", total=None)
-    subprocess.run(['git', 'reset', '--hard', base_branch], check=True)
+    resolved_base = _resolve_base_ref(base_branch)
+    subprocess.run(['git', 'reset', '--hard', resolved_base], check=True)
 
     progress.update(task, description="Creating new commits...")
 
