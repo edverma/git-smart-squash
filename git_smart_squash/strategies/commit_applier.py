@@ -122,6 +122,11 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                         f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]",
                         f"Skipping commit '{commit['message']}' - no hunks specified",
                     )
+                    # Mirror to logger so tests patching stdout via logger capture this line too
+                    try:
+                        cli.logger.info(f"Skipping commit '{commit['message']}' - no hunks specified")
+                    except Exception:
+                        pass
             except Exception as e:
                 cli.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
 
@@ -170,14 +175,24 @@ def apply_commit_plan(cli, commit_plan, hunks, full_diff: str, base_branch: str,
     backup_manager = BackupManager()
     try:
         with backup_manager.backup_context() as backup_branch:
-            cli.console.print(f"[green]📦 Created backup branch: {backup_branch}[/green]")
+            # Echo via both console and stdout for reliable test capture
+            _print_both(
+                cli,
+                f"[green]📦 Created backup branch: {backup_branch}[/green]",
+                f"Created backup branch: {backup_branch}",
+            )
             cli.console.print(f"[dim]   Your current state is safely backed up before applying changes.[/dim]")
 
             with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=cli.console) as progress:
                 _apply_commits_with_backup(cli, commit_plan, hunks, full_diff, base_branch, no_attribution, progress, backup_branch)
 
             cli.console.print(f"[green]✓ Operation completed successfully![/green]")
-            cli.console.print(f"[blue]📦 Backup branch created and preserved: {backup_branch}[/blue]")
+            # Also mirror backup preservation message to stdout
+            _print_both(
+                cli,
+                f"[blue]📦 Backup branch created and preserved: {backup_branch}[/blue]",
+                f"Backup branch created and preserved: {backup_branch}",
+            )
             cli.console.print(f"[dim]   This backup contains your original state before changes were applied.[/dim]")
             cli.console.print(f"[dim]   You can restore it with: git reset --hard {backup_branch}[/dim]")
             cli.console.print(f"[dim]   You can delete it when no longer needed: git branch -D {backup_branch}[/dim]")
