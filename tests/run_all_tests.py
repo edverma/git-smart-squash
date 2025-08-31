@@ -53,14 +53,16 @@ def main():
     print(f"Test timeout: 30 seconds per test (excluding local AI tests)")
     print(f"{'='*70}\n")
 
-    # Get the directory of this script
+    # Get the directory of this script and project root
     test_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(test_dir)
     
     # Create test loader
     loader = unittest.TestLoader()
     
-    # Discover all tests
-    all_tests = loader.discover(test_dir, pattern=args.pattern, top_level_dir=test_dir)
+    # Discover all tests with the project root as top level so
+    # relative imports like `from .test_utils import ...` work.
+    all_tests = loader.discover(test_dir, pattern=args.pattern, top_level_dir=project_root)
     
     # If AI tests should be excluded (default), remove them
     if not args.include_ai and 'test_ai_integration.py' not in args.exclude:

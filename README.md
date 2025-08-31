@@ -75,11 +75,13 @@ That's it. Review the plan and approve.
 | `--instructions`, `-i` | Custom instructions for AI (e.g., "Group by feature area") | None |
 | `--no-attribution` | Disable attribution message in commits | `false` |
 | `--debug` | Enable debug logging for detailed information | `false` |
+| `--reasoning` | Reasoning effort for GPT-5 (high, medium, low, minimal) | `low` |
+| `--max-predict-tokens` | Maximum tokens for completion/output | `200000` |
 
 ## Recommended Models
 
 ### Default Models
-- **OpenAI**: `gpt-4.1` (default)
+- **OpenAI**: `gpt-5` (default), `gpt-5-mini`, `gpt-5-nano` - Only GPT-5 models supported, default reasoning: low
 - **Anthropic**: `claude-sonnet-4-20250514` (default)
 - **Gemini**: `gemini-2.5-pro` (default)
 - **Local/Ollama**: `devstral` (default)
@@ -87,10 +89,28 @@ That's it. Review the plan and approve.
 ### Model Selection
 ```bash
 # Specify a different model
-git-smart-squash --ai-provider openai --model gpt-4.1-mini
+git-smart-squash --ai-provider openai --model gpt-5-mini
 
 # For local Ollama
 git-smart-squash --ai-provider local --model llama-3.1
+```
+
+## Migration: OpenAI to GPT-5 (Responses API)
+
+- The OpenAI integration now uses the Responses API, supporting GPT‑5 models only.
+- Supported models: `gpt-5` (default), `gpt-5-mini`, `gpt-5-nano`.
+- You can control reasoning effort with `--reasoning` (`high | medium | low | minimal`; default: `low`).
+- If you previously used GPT‑4.* models, switch to GPT‑5 or select another provider:
+  - OpenAI: `--ai-provider openai --model gpt-5`
+  - Anthropic: `--ai-provider anthropic --model claude-sonnet-4-20250514`
+  - Gemini: `--ai-provider gemini --model gemini-2.5-pro`
+  - Local (Ollama): `--ai-provider local --model devstral`
+- The CLI includes a gentle pre-check: if OpenAI is selected with a non‑GPT‑5 model, a helpful message is shown with guidance to migrate.
+
+Example with reasoning:
+
+```bash
+git-smart-squash --ai-provider openai --model gpt-5 --reasoning high
 ```
 
 ## Custom Instructions
@@ -165,15 +185,18 @@ Want to customize? Create a config file:
 **Project-specific** (`.git-smart-squash.yml` in your repo):
 ```yaml
 ai:
-  provider: openai  # Use OpenAI for this project
-base: develop       # Use develop as the base branch for this project
+  provider: openai          # Use OpenAI for this project
+  reasoning: medium         # Use medium reasoning effort
+  max_predict_tokens: 100000  # Limit output to 100k tokens
+base: develop               # Use develop as the base branch for this project
 ```
 
 **Global default** (`~/.git-smart-squash.yml`):
 ```yaml
 ai:
-  provider: local   # Always use local AI by default
-base: main          # Default base branch for all projects
+  provider: local           # Always use local AI by default
+  max_predict_tokens: 50000 # Conservative output limit for local models
+base: main                  # Default base branch for all projects
 ```
 
 ## Troubleshooting
@@ -186,7 +209,7 @@ This usually means the AI model couldn't format the response properly:
 
 ### Model Not Following Instructions
 Some models struggle with complex instructions:
-- **Use better models**: `--model gpt-4-turbo` or `--model claude-3-opus`
+- **Use better models**: `--model gpt-5` or `--model claude-3-opus`
 - **Simplify instructions**: One clear directive works better than multiple
 - **Be explicit**: "Prefix with [ABC-123]" not "add ticket number"
 
@@ -230,4 +253,3 @@ Check out our [detailed documentation](DOCUMENTATION.md) or open an issue!
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-

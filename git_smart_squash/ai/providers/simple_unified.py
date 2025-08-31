@@ -3,7 +3,6 @@
 import os
 import subprocess
 import json
-import google.generativeai as genai
 from ...logger import get_logger
 
 logger = get_logger()
@@ -15,14 +14,15 @@ class UnifiedAIProvider:
     # Provider-specific hard maximum context token limits
     PROVIDER_MAX_CONTEXT_TOKENS = {
         'local': 32000,       # Ollama hard maximum
-        'openai': 1000000,    # OpenAI hard maximum (1M tokens)
+        'openai': 400000,     # OpenAI GPT-5 only (400k tokens)
         'gemini': 1000000,    # Gemini hard maximum (1M tokens)
         'anthropic': 200000   # Anthropic hard maximum (200k tokens)
     }
     
+    
     # Conservative defaults
     DEFAULT_MAX_CONTEXT_TOKENS = 32000
-    MAX_PREDICT_TOKENS = 32000
+    MAX_PREDICT_TOKENS = 64000  # Default max output tokens
     
     # Schema for commit organization JSON structure  
     COMMIT_SCHEMA = {
@@ -130,7 +130,7 @@ class UnifiedAIProvider:
             response_buffer = min(response_buffer, 1000)
         
         # Set prediction tokens based on expected response size
-        response_tokens = min(response_buffer, self.MAX_PREDICT_TOKENS)
+        response_tokens = min(response_buffer, self.config.ai.max_predict_tokens)
         
         return {
             "prompt_tokens": prompt_tokens,
@@ -186,17 +186,45 @@ class UnifiedAIProvider:
             # Calculate optimal parameters based on prompt size
             ollama_params = self._calculate_ollama_params(prompt)
             
+            # Check if model supports native reasoning (currently only gpt-oss models)
+            supports_reasoning = "gpt-oss" in self.config.ai.model.lower()
+            
+            # Prepare the prompt with reasoning directive if supported
+            if supports_reasoning and self.config.ai.reasoning:
+                # Map our reasoning levels to gpt-oss levels
+                reasoning_map = {
+                    "minimal": "low",    # Map minimal to low for gpt-oss
+                    "low": "low",
+                    "medium": "medium",
+                    "high": "high"
+                }
+                reasoning_level = reasoning_map.get(self.config.ai.reasoning, "medium")
+                
+                # Add reasoning directive to system prompt
+                # gpt-oss models recognize "Reasoning: level" in system prompts
+                system_prompt = f"Reasoning: {reasoning_level}\n\n"
+                full_prompt = system_prompt + prompt
+                logger.debug(f"Using gpt-oss model with native reasoning level: {reasoning_level}")
+            else:
+                full_prompt = prompt
+                
+                # Log warning if reasoning was requested but model doesn't support it
+                if self.config.ai.reasoning and not supports_reasoning:
+                    logger.warning(f"Model {self.config.ai.model} does not support native reasoning. "
+                                 f"Reasoning parameter '{self.config.ai.reasoning}' will be ignored. "
+                                 f"Consider using gpt-oss models for native reasoning support.")
+            
             payload = {
                 "model": self.config.ai.model,
-                "prompt": prompt,
+                "prompt": full_prompt,
                 "stream": False,
                 "format": self.COMMIT_SCHEMA,  # Enforce JSON structure
                 "options": {
                     "num_ctx": ollama_params["num_ctx"],
                     "num_predict": ollama_params["num_predict"],
-                    "temperature": 0.1,  # Lower temperature for more structured output
-                    "top_p": 0.95,       # Higher top_p for better instruction following
-                    "top_k": 20,         # Lower top_k for more focused responses
+                    "temperature": 0.1,  # Keep consistent temperature
+                    "top_p": 0.95,       # Keep consistent top_p
+                    "top_k": 20,         # Keep consistent top_k
                     "repeat_penalty": 1.1,  # Prevent repetitive explanations
                     "stop": ["\n\nHuman:", "User:", "Assistant:", "Note:"]  # Stop conversational patterns
                 }
@@ -230,14 +258,15 @@ class UnifiedAIProvider:
             if response.get('done', True) is False:
                 logger.warning(f"Response may have been truncated. Used {ollama_params['num_ctx']} context tokens.")
             
-            # Parse and ensure correct format
+            # Parse and normalize to array format for tests/consumers
             try:
                 parsed = json.loads(response_text)
-                if isinstance(parsed, dict) and "commits" in parsed:
-                    return json.dumps(parsed)  # Return full dict
+                if isinstance(parsed, dict) and "commits" in parsed and isinstance(parsed["commits"], list):
+                    # Always return the commits array as JSON
+                    return json.dumps(parsed["commits"])
                 elif isinstance(parsed, list):
-                    # Wrap list in expected format
-                    return json.dumps({"commits": parsed})
+                    # Already an array of commit objects
+                    return json.dumps(parsed)
                 else:
                     return response_text
             except json.JSONDecodeError:
@@ -251,53 +280,102 @@ class UnifiedAIProvider:
             raise Exception(f"Local AI generation failed: {e}")
     
     def _generate_openai(self, prompt: str) -> str:
-        """Generate using OpenAI API with structured output enforcement."""
+        """Generate using OpenAI Responses API with GPT-5 models only."""
         try:
             import openai
-            
+
             api_key = os.getenv('OPENAI_API_KEY')
             if not api_key:
                 raise Exception("OPENAI_API_KEY environment variable not set")
-            
+
+            # Validate model is GPT-5
+            if not self.config.ai.model.startswith('gpt-5'):
+                raise Exception(
+                    f"Model {self.config.ai.model} is not supported. Only GPT-5 models (gpt-5, gpt-5-mini, gpt-5-nano) are supported."
+                )
+
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
-            
-            # Use provider-level context limit
-            model_context_limit = self.PROVIDER_MAX_CONTEXT_TOKENS.get('openai', 1000000)
-            
+
+            # GPT-5 context limit is 400k tokens
+            model_context_limit = 400000
+
             # Check if prompt exceeds model context limit
             if params["prompt_tokens"] > model_context_limit - 1000:  # Reserve 1000 for response
-                raise Exception(f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size.")
-            
+                raise Exception(
+                    f"Prompt ({params['prompt_tokens']} tokens) exceeds {self.config.ai.model} context limit ({model_context_limit}). Consider reducing diff size."
+                )
+
             # Warn if prompt is large but manageable
             if params["prompt_tokens"] > model_context_limit * 0.7:
-                logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
-            
+                logger.warning(
+                    f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit."
+                )
+
             client = openai.OpenAI(api_key=api_key)
-            
-            response = client.chat.completions.create(
-                model=self.config.ai.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=self.MAX_PREDICT_TOKENS,
-                temperature=0.7,
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
+
+            # Map reasoning effort (pass through all valid values, including 'minimal')
+            reasoning = self.config.ai.reasoning
+            reasoning_param = {"effort": reasoning} if reasoning else None
+
+            # Build the request parameters for Responses API
+            # Structured outputs for Responses API are configured under text.format
+            response_params = {
+                "model": self.config.ai.model,
+                # Responses API expects `input` for text input
+                "input": prompt,
+                # Use dynamically calculated response tokens within our cap
+                "max_output_tokens": params.get("response_tokens", self.config.ai.max_predict_tokens),
+                # Enforce structured JSON output via Responses API text.format
+                "text": {
+                    "format": {
+                        "type": "json_schema",
                         "name": "commit_plan",
                         "schema": self.COMMIT_SCHEMA,
-                        "strict": True
+                        "strict": True,
                     }
-                }
-            )
-            
-            # Check if response was truncated
-            if response.choices[0].finish_reason == "length":
-                logger.warning(f"OpenAI response truncated at {self.MAX_PREDICT_TOKENS} tokens. Consider reducing diff size.")
-            
-            # Return the full structured response
-            content = response.choices[0].message.content
-            return content  # OpenAI already returns the correct format with json_schema
-            
+                },
+            }
+            if reasoning_param is not None:
+                response_params["reasoning"] = reasoning_param
+
+            # Call the responses API
+            try:
+                response = client.responses.create(**response_params)
+                logger.debug(
+                    f"Successfully used responses API for {self.config.ai.model} with {self.config.ai.reasoning} reasoning"
+                )
+            except Exception as e:
+                raise Exception(f"OpenAI responses API call failed: {e}")
+
+            # If the SDK exposes output_text, prefer it; otherwise fall back safely
+            try:
+                content = getattr(response, "output_text", None)
+                if not content:
+                    # Fallback to extracting from output structure
+                    # response.output is a list of Output objects with .content
+                    if hasattr(response, "output") and response.output:
+                        first = response.output[0]
+                        if hasattr(first, "content") and first.content:
+                            # Each content item may be text/json parts
+                            part = first.content[0]
+                            # Try common attributes
+                            text = getattr(part, "text", None) or getattr(part, "content", None)
+                            content = text if isinstance(text, str) else None
+                if not content:
+                    # As a last resort, try choices/message shape (older clients)
+                    if hasattr(response, "choices") and response.choices:
+                        choice0 = response.choices[0]
+                        msg = getattr(choice0, "message", None)
+                        content = getattr(msg, "content", None) if msg else None
+            except Exception:
+                content = None
+
+            if not content:
+                raise Exception("Failed to extract content from OpenAI response")
+
+            return content  # JSON string per json_schema enforcement
+
         except ImportError:
             raise Exception("OpenAI library not installed. Run: pip install openai")
         except Exception as e:
@@ -335,12 +413,29 @@ class UnifiedAIProvider:
                 "input_schema": self.COMMIT_SCHEMA
             }]
             
+            # Map reasoning effort to thinking budget for Claude models
+            # Claude uses budget_tokens for extended thinking
+            extra_headers = {}
+            if self.config.ai.reasoning:
+                reasoning_map = {
+                    "minimal": 1000,    # Minimal thinking
+                    "low": 5000,        # Low thinking budget
+                    "medium": 15000,    # Medium thinking budget (default)
+                    "high": 30000       # High thinking budget
+                }
+                budget_tokens = reasoning_map.get(self.config.ai.reasoning, 15000)
+                # Enable interleaved thinking beta
+                extra_headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+                logger.debug(f"Using Claude extended thinking with budget_tokens={budget_tokens} for reasoning={self.config.ai.reasoning}")
+            
             response = client.messages.create(
                 model=self.config.ai.model,
-                max_tokens=self.MAX_PREDICT_TOKENS,
+                max_tokens=self.config.ai.max_predict_tokens,
                 tools=tools,
                 tool_choice={"type": "tool", "name": "commit_organizer"},
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
+                timeout=120.0,  # Add explicit timeout
+                extra_headers=extra_headers if extra_headers else None
             )
             
             # Extract structured data from tool use
@@ -364,12 +459,12 @@ class UnifiedAIProvider:
     def _generate_gemini(self, prompt: str) -> str:
         """Generate using Google Gemini API with structured output enforcement."""
         try:
+            from google import genai
+            from google.genai import types
+            
             api_key = os.getenv('GEMINI_API_KEY')
             if not api_key:
                 raise Exception("GEMINI_API_KEY environment variable not set")
-            
-            # Configure the API
-            genai.configure(api_key=api_key)
             
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
@@ -385,43 +480,53 @@ class UnifiedAIProvider:
             if params["prompt_tokens"] > model_context_limit * 0.8:
                 logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
-            # Create the model
-            model = genai.GenerativeModel(self.config.ai.model)
+            # Map reasoning effort to thinking budget for Gemini models
+            # Based on OpenAI compatibility mapping: low=1024, medium=8192, high=24576
+            thinking_budget = None
+            if self.config.ai.reasoning:
+                reasoning_map = {
+                    "minimal": 0,       # Disable thinking for minimal (if supported)
+                    "low": 1024,        # Low thinking budget
+                    "medium": 8192,     # Medium thinking budget (default)
+                    "high": 24576       # High thinking budget
+                }
+                thinking_budget = reasoning_map.get(self.config.ai.reasoning, 8192)
+                # For Gemini 2.5 Pro, thinking cannot be disabled (minimal will use low)
+                if thinking_budget == 0 and "pro" in self.config.ai.model.lower():
+                    thinking_budget = 1024
+                    logger.debug(f"Gemini 2.5 Pro does not support disabling thinking, using low budget instead")
+                logger.debug(f"Using Gemini thinking budget={thinking_budget} for reasoning={self.config.ai.reasoning}")
             
-            # Configure generation with JSON mode for structured output
-            generation_config = genai.types.GenerationConfig(
-                candidate_count=1,
-                max_output_tokens=self.MAX_PREDICT_TOKENS,
-                temperature=0.1,  # Lower temperature for more structured output
-                top_p=0.95,       # Higher top_p for better instruction following
-                top_k=20,         # Lower top_k for more focused responses
-                response_mime_type="application/json",  # Force JSON output
-                response_schema=self.GEMINI_SCHEMA  # Use Gemini-compatible schema
-            )
+            # Create client
+            client = genai.Client(api_key=api_key)
+            
+            # Build config with thinking budget and JSON output
+            config_params = {
+                "response_config": types.GenerateContentConfig.ResponseConfig(
+                    max_output_tokens=self.config.ai.max_predict_tokens,
+                    temperature=0.1,  # Lower temperature for more structured output
+                    top_p=0.95,       # Higher top_p for better instruction following
+                    top_k=20,         # Lower top_k for more focused responses
+                    response_mime_type="application/json",  # Force JSON output
+                    response_schema=self.GEMINI_SCHEMA  # Use Gemini-compatible schema
+                )
+            }
+            
+            # Add thinking config if specified
+            if thinking_budget is not None:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+            
+            config = types.GenerateContentConfig(**config_params)
             
             # Generate response
-            response = model.generate_content(
-                prompt,
-                generation_config=generation_config
+            response = client.models.generate_content(
+                model=self.config.ai.model,
+                contents=prompt,
+                config=config
             )
             
-            # Check if response was blocked
-            if response.candidates[0].finish_reason.name in ['SAFETY', 'RECITATION']:
-                raise Exception(f"Gemini response blocked due to safety filters: {response.candidates[0].finish_reason}")
-            
-            # Check if response was truncated
-            if response.candidates[0].finish_reason.name == 'MAX_TOKENS':
-                raise Exception(f"Gemini response truncated at {max_response_tokens} tokens. Consider reducing diff size or using a model with larger context window.")
-            
-            # Check if response has no valid parts
-            if not response.candidates[0].content.parts:
-                raise Exception(f"Gemini response has no content parts. Finish reason: {response.candidates[0].finish_reason}")
-            
-            # Extract structured data from response
-            try:
-                response_text = response.text
-            except Exception as e:
-                raise Exception(f"Failed to extract text from Gemini response: {e}. Finish reason: {response.candidates[0].finish_reason}")
+            # Extract text from response
+            response_text = response.text
             
             # Parse the JSON response and return the full structure
             try:

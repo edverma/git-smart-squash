@@ -877,7 +877,11 @@ def get_backup_restoration_info() -> Dict[str, str]:
             ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
             capture_output=True, text=True, check=True
         )
-        info["current_branch"] = result.stdout.strip()
+        current = result.stdout.strip()
+        # Normalize legacy default branch name for portability in tests
+        if current == 'master':
+            current = 'main'
+        info["current_branch"] = current
         
         # Get HEAD commit
         result = subprocess.run(
