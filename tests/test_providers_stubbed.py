@@ -108,15 +108,59 @@ class TestGeminiStubbed(unittest.TestCase):
                                  GenerativeModel=lambda model_name: FakeModel(),
                                  types=types.SimpleNamespace(GenerationConfig=lambda **kwargs: object()))
 
-        self.prev = sys.modules.get('google.generativeai')
-        sys.modules['google.generativeai'] = FakeGenAI()
+        self.prev_genai = sys.modules.get('google.genai')
+        self.prev_google = sys.modules.get('google')
+        
+        # Mock the new API
+        class FakeResponse:
+            text = json.dumps({"commits": [{"message": "feat: y", "hunk_ids": [], "rationale": "r"}]})
+        
+        class FakeModels:
+            def generate_content(self, model, contents, config=None):
+                return FakeResponse()
+        
+        class FakeClient:
+            def __init__(self, api_key=None):
+                self.models = FakeModels()
+        
+        class FakeResponseConfig:
+            def __init__(self, **kwargs):
+                pass
+        
+        class FakeGenerateContentConfig:
+            ResponseConfig = FakeResponseConfig
+            def __init__(self, **kwargs):
+                pass
+        
+        class FakeThinkingConfig:
+            def __init__(self, thinking_budget):
+                pass
+        
+        fake_types = types.SimpleNamespace(
+            GenerateContentConfig=FakeGenerateContentConfig,
+            ThinkingConfig=FakeThinkingConfig
+        )
+        
+        fake_genai = types.SimpleNamespace(
+            Client=FakeClient,
+            types=fake_types
+        )
+        
+        sys.modules['google.genai'] = fake_genai
+        sys.modules['google'] = types.SimpleNamespace(genai=fake_genai)
         os.environ['GEMINI_API_KEY'] = 'fake'
 
     def tearDown(self):
-        if self.prev is None:
-            sys.modules.pop('google.generativeai', None)
+        # Restore original modules
+        if self.prev_genai is None:
+            sys.modules.pop('google.genai', None)
         else:
-            sys.modules['google.generativeai'] = self.prev
+            sys.modules['google.genai'] = self.prev_genai
+            
+        if self.prev_google is None:
+            sys.modules.pop('google', None)
+        else:
+            sys.modules['google'] = self.prev_google
 
     def test_gemini_structured_output(self):
         out = self.provider._generate_gemini('prompt')

@@ -186,17 +186,45 @@ class UnifiedAIProvider:
             # Calculate optimal parameters based on prompt size
             ollama_params = self._calculate_ollama_params(prompt)
             
+            # Check if model supports native reasoning (currently only gpt-oss models)
+            supports_reasoning = "gpt-oss" in self.config.ai.model.lower()
+            
+            # Prepare the prompt with reasoning directive if supported
+            if supports_reasoning and self.config.ai.reasoning:
+                # Map our reasoning levels to gpt-oss levels
+                reasoning_map = {
+                    "minimal": "low",    # Map minimal to low for gpt-oss
+                    "low": "low",
+                    "medium": "medium",
+                    "high": "high"
+                }
+                reasoning_level = reasoning_map.get(self.config.ai.reasoning, "medium")
+                
+                # Add reasoning directive to system prompt
+                # gpt-oss models recognize "Reasoning: level" in system prompts
+                system_prompt = f"Reasoning: {reasoning_level}\n\n"
+                full_prompt = system_prompt + prompt
+                logger.debug(f"Using gpt-oss model with native reasoning level: {reasoning_level}")
+            else:
+                full_prompt = prompt
+                
+                # Log warning if reasoning was requested but model doesn't support it
+                if self.config.ai.reasoning and not supports_reasoning:
+                    logger.warning(f"Model {self.config.ai.model} does not support native reasoning. "
+                                 f"Reasoning parameter '{self.config.ai.reasoning}' will be ignored. "
+                                 f"Consider using gpt-oss models for native reasoning support.")
+            
             payload = {
                 "model": self.config.ai.model,
-                "prompt": prompt,
+                "prompt": full_prompt,
                 "stream": False,
                 "format": self.COMMIT_SCHEMA,  # Enforce JSON structure
                 "options": {
                     "num_ctx": ollama_params["num_ctx"],
                     "num_predict": ollama_params["num_predict"],
-                    "temperature": 0.1,  # Lower temperature for more structured output
-                    "top_p": 0.95,       # Higher top_p for better instruction following
-                    "top_k": 20,         # Lower top_k for more focused responses
+                    "temperature": 0.1,  # Keep consistent temperature
+                    "top_p": 0.95,       # Keep consistent top_p
+                    "top_k": 20,         # Keep consistent top_k
                     "repeat_penalty": 1.1,  # Prevent repetitive explanations
                     "stop": ["\n\nHuman:", "User:", "Assistant:", "Note:"]  # Stop conversational patterns
                 }
@@ -385,13 +413,29 @@ class UnifiedAIProvider:
                 "input_schema": self.COMMIT_SCHEMA
             }]
             
+            # Map reasoning effort to thinking budget for Claude models
+            # Claude uses budget_tokens for extended thinking
+            extra_headers = {}
+            if self.config.ai.reasoning:
+                reasoning_map = {
+                    "minimal": 1000,    # Minimal thinking
+                    "low": 5000,        # Low thinking budget
+                    "medium": 15000,    # Medium thinking budget (default)
+                    "high": 30000       # High thinking budget
+                }
+                budget_tokens = reasoning_map.get(self.config.ai.reasoning, 15000)
+                # Enable interleaved thinking beta
+                extra_headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+                logger.debug(f"Using Claude extended thinking with budget_tokens={budget_tokens} for reasoning={self.config.ai.reasoning}")
+            
             response = client.messages.create(
                 model=self.config.ai.model,
                 max_tokens=self.config.ai.max_predict_tokens,
                 tools=tools,
                 tool_choice={"type": "tool", "name": "commit_organizer"},
                 messages=[{"role": "user", "content": prompt}],
-                timeout=120.0  # Add explicit timeout
+                timeout=120.0,  # Add explicit timeout
+                extra_headers=extra_headers if extra_headers else None
             )
             
             # Extract structured data from tool use
@@ -415,13 +459,12 @@ class UnifiedAIProvider:
     def _generate_gemini(self, prompt: str) -> str:
         """Generate using Google Gemini API with structured output enforcement."""
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
+            
             api_key = os.getenv('GEMINI_API_KEY')
             if not api_key:
                 raise Exception("GEMINI_API_KEY environment variable not set")
-            
-            # Configure the API
-            genai.configure(api_key=api_key)
             
             # Calculate dynamic parameters
             params = self._calculate_dynamic_params(prompt)
@@ -437,44 +480,53 @@ class UnifiedAIProvider:
             if params["prompt_tokens"] > model_context_limit * 0.8:
                 logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
-            # Create the model
-            model = genai.GenerativeModel(self.config.ai.model)
+            # Map reasoning effort to thinking budget for Gemini models
+            # Based on OpenAI compatibility mapping: low=1024, medium=8192, high=24576
+            thinking_budget = None
+            if self.config.ai.reasoning:
+                reasoning_map = {
+                    "minimal": 0,       # Disable thinking for minimal (if supported)
+                    "low": 1024,        # Low thinking budget
+                    "medium": 8192,     # Medium thinking budget (default)
+                    "high": 24576       # High thinking budget
+                }
+                thinking_budget = reasoning_map.get(self.config.ai.reasoning, 8192)
+                # For Gemini 2.5 Pro, thinking cannot be disabled (minimal will use low)
+                if thinking_budget == 0 and "pro" in self.config.ai.model.lower():
+                    thinking_budget = 1024
+                    logger.debug(f"Gemini 2.5 Pro does not support disabling thinking, using low budget instead")
+                logger.debug(f"Using Gemini thinking budget={thinking_budget} for reasoning={self.config.ai.reasoning}")
             
-            # Configure generation with JSON mode for structured output
-            generation_config = genai.types.GenerationConfig(
-                candidate_count=1,
-                max_output_tokens=self.config.ai.max_predict_tokens,
-                temperature=0.1,  # Lower temperature for more structured output
-                top_p=0.95,       # Higher top_p for better instruction following
-                top_k=20,         # Lower top_k for more focused responses
-                response_mime_type="application/json",  # Force JSON output
-                response_schema=self.GEMINI_SCHEMA  # Use Gemini-compatible schema
-            )
+            # Create client
+            client = genai.Client(api_key=api_key)
+            
+            # Build config with thinking budget and JSON output
+            config_params = {
+                "response_config": types.GenerateContentConfig.ResponseConfig(
+                    max_output_tokens=self.config.ai.max_predict_tokens,
+                    temperature=0.1,  # Lower temperature for more structured output
+                    top_p=0.95,       # Higher top_p for better instruction following
+                    top_k=20,         # Lower top_k for more focused responses
+                    response_mime_type="application/json",  # Force JSON output
+                    response_schema=self.GEMINI_SCHEMA  # Use Gemini-compatible schema
+                )
+            }
+            
+            # Add thinking config if specified
+            if thinking_budget is not None:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+            
+            config = types.GenerateContentConfig(**config_params)
             
             # Generate response
-            response = model.generate_content(
-                prompt,
-                generation_config=generation_config
+            response = client.models.generate_content(
+                model=self.config.ai.model,
+                contents=prompt,
+                config=config
             )
             
-            # Check if response was blocked
-            if response.candidates[0].finish_reason.name in ['SAFETY', 'RECITATION']:
-                raise Exception(f"Gemini response blocked due to safety filters: {response.candidates[0].finish_reason}")
-            
-            # Check if response was truncated
-            if response.candidates[0].finish_reason.name == 'MAX_TOKENS':
-                max_response_tokens = params.get("response_tokens", self.config.ai.max_predict_tokens)
-                raise Exception(f"Gemini response truncated at {max_response_tokens} tokens. Consider reducing diff size or using a model with larger context window.")
-            
-            # Check if response has no valid parts
-            if not response.candidates[0].content.parts:
-                raise Exception(f"Gemini response has no content parts. Finish reason: {response.candidates[0].finish_reason}")
-            
-            # Extract structured data from response
-            try:
-                response_text = response.text
-            except Exception as e:
-                raise Exception(f"Failed to extract text from Gemini response: {e}. Finish reason: {response.candidates[0].finish_reason}")
+            # Extract text from response
+            response_text = response.text
             
             # Parse the JSON response and return the full structure
             try:
