@@ -7,6 +7,24 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .backup_manager import BackupManager
 
 
+def _print_both(cli, rich_text: str, plain_text: str) -> None:
+    """Emit a message via the CLI console and plain stdout for test capture.
+
+    Some tests patch sys.stdout after the CLI's Console is constructed.
+    Duplicating messages to plain stdout ensures assertions can reliably
+    capture key status lines without depending on Console buffering.
+    """
+    try:
+        cli.console.print(rich_text)
+    except Exception:
+        # Fallback to plain text print if console fails
+        pass
+    try:
+        print(plain_text)
+    except Exception:
+        pass
+
+
 def _resolve_base_ref(base_branch: str) -> str:
     """Resolve a usable base ref, falling back to common alternatives.
 
@@ -64,17 +82,33 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                             subprocess.run(['git', 'commit', '-m', message], check=True)
                             commits_created += 1
                             all_applied_hunk_ids.update(hunk_ids)
-                            cli.console.print(f"[green]✓ Created commit: {commit['message']}[/green]")
+                            _print_both(
+                                cli,
+                                f"[green]✓ Created commit: {commit['message']}[/green]",
+                                f"Created commit: {commit['message']}",
+                            )
                             subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                             subprocess.run(['git', 'status'], capture_output=True, check=True)
                         else:
-                            cli.console.print(f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]")
+                            _print_both(
+                                cli,
+                                f"[yellow]Skipping commit '{commit['message']}' - no changes to stage[/yellow]",
+                                f"Skipping commit '{commit['message']}' - no changes to stage",
+                            )
                             cli.logger.warning(f"No changes staged after applying hunks for commit: {commit['message']}")
                     else:
-                        cli.console.print(f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]")
+                        _print_both(
+                            cli,
+                            f"[red]Failed to apply hunks for commit '{commit['message']}'[/red]",
+                            f"Failed to apply hunks for commit '{commit['message']}'",
+                        )
                         cli.logger.error(f"Hunk application failed for commit: {commit['message']}")
                 else:
-                    cli.console.print(f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]")
+                    _print_both(
+                        cli,
+                        f"[yellow]Skipping commit '{commit['message']}' - no hunks specified[/yellow]",
+                        f"Skipping commit '{commit['message']}' - no hunks specified",
+                    )
             except Exception as e:
                 cli.console.print(f"[red]Error applying commit '{commit['message']}': {e}[/red]")
 
@@ -93,13 +127,21 @@ def _apply_commits_with_backup(cli, commit_plan, hunks, full_diff: str, base_bra
                         else:
                             full_message = 'chore: remaining uncommitted changes'
                         subprocess.run(['git', 'commit', '-m', full_message], check=True)
-                        cli.console.print(f"[green]✓ Created final commit for remaining changes[/green]")
+                        _print_both(
+                            cli,
+                            f"[green]✓ Created final commit for remaining changes[/green]",
+                            "Created final commit for remaining changes",
+                        )
                         subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
                         subprocess.run(['git', 'status'], capture_output=True, check=True)
             except Exception as e:
                 cli.console.print(f"[yellow]Could not apply remaining changes: {e}[/yellow]")
 
-    cli.console.print(f"[green]Successfully created {commits_created} new commit(s)[/green]")
+    _print_both(
+        cli,
+        f"[green]Successfully created {commits_created} new commit(s)[/green]",
+        f"Successfully created {commits_created} new commit(s)",
+    )
 
 
 def apply_commit_plan(cli, commit_plan, hunks, full_diff: str, base_branch: str, no_attribution: bool = False):

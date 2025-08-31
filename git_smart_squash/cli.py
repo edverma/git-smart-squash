@@ -158,11 +158,11 @@ class GitSmartSquashCLI:
                 self.console.print("[yellow]No changes found to reorganize[/yellow]")
                 return
 
-            # 1.5. Ensure working directory is clean before proceeding with analysis/application
+            # 1.5. Working directory pre-check: show guidance if dirty, but continue to analysis.
+            # Final safety check happens again before any apply.
             status_info = self._check_working_directory_clean()
             if not status_info['is_clean']:
                 self._display_working_directory_help(status_info)
-                return
 
             # 2. Parse diff into individual hunks
             with Progress(
@@ -224,15 +224,6 @@ class GitSmartSquashCLI:
             # 3. Display the plan
             self.display_commit_plan(commit_plan)
 
-            # 4. Double-check working directory is clean before applying changes
-            self.console.print("[dim]Final working directory check before applying changes...[/dim]")
-            final_status_info = self._check_working_directory_clean()
-
-            if not final_status_info['is_clean']:
-                self.console.print("[red]❌ Working directory changed during operation![/red]")
-                self._display_working_directory_help(final_status_info)
-                return
-
             # 5. Ask for confirmation (unless auto-applying)
             # Auto-apply if --auto-apply flag is provided or if config says to auto-apply
             auto_apply_from_config = getattr(self.config, 'auto_apply', False)
@@ -241,8 +232,22 @@ class GitSmartSquashCLI:
                     self.console.print("\n[green]Applying commit plan (--auto-apply flag provided)[/green]")
                 elif auto_apply_from_config:
                     self.console.print("\n[green]Auto-applying commit plan (configured in settings)[/green]")
+                # Final check right before apply
+                self.console.print("[dim]Final working directory check before applying changes...[/dim]")
+                final_status_info = self._check_working_directory_clean()
+                if not final_status_info['is_clean']:
+                    self.console.print("[red]❌ Working directory changed during operation![/red]")
+                    self._display_working_directory_help(final_status_info)
+                    return
                 self.apply_commit_plan(commit_plan, hunks, full_diff, args.base, args.no_attribution)
             elif self.get_user_confirmation():
+                # Final check after user confirms
+                self.console.print("[dim]Final working directory check before applying changes...[/dim]")
+                final_status_info = self._check_working_directory_clean()
+                if not final_status_info['is_clean']:
+                    self.console.print("[red]❌ Working directory changed during operation![/red]")
+                    self._display_working_directory_help(final_status_info)
+                    return
                 self.apply_commit_plan(commit_plan, hunks, full_diff, args.base, args.no_attribution)
             else:
                 self.console.print("Operation cancelled.")
