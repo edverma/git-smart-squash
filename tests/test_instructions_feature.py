@@ -277,56 +277,59 @@ index 0000000..3456789
     def test_integration_with_dry_run(self):
         """Test that instructions work correctly with --dry-run."""
         with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = os.getcwd()
             os.chdir(tmpdir)
-            
-            # Initialize git repo
-            subprocess.run(['git', 'init'], check=True, capture_output=True)
-            subprocess.run(['git', 'config', 'user.email', 'test@example.com'], check=True)
-            subprocess.run(['git', 'config', 'user.name', 'Test User'], check=True)
-            
-            # Create initial commit
-            with open('README.md', 'w') as f:
-                f.write('# Test\n')
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', 'Initial commit'], check=True)
-            
-            # Create feature branch with changes
-            subprocess.run(['git', 'checkout', '-b', 'feature'], check=True)
-            
-            with open('api.py', 'w') as f:
-                f.write('def get_data():\n    return []\n')
-            with open('db.py', 'w') as f:
-                f.write('def connect():\n    pass\n')
-            
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', 'WIP'], check=True)
-            
-            # Mock the AI response
-            with patch('git_smart_squash.ai.providers.simple_unified.UnifiedAIProvider.generate') as mock_generate:
-                mock_generate.return_value = json.dumps([{
-                    'message': 'feat: add database layer',
-                    'hunk_ids': ['db.py:1-2'],
-                    'rationale': 'Following instruction to separate layers'
-                }, {
-                    'message': 'feat: add API layer',
-                    'hunk_ids': ['api.py:1-2'],
-                    'rationale': 'Following instruction to separate layers'
-                }])
-                
-                # Run with custom instructions
-                parser = self.cli.create_parser()
-                args = parser.parse_args([
-                    '--instructions', 'Separate database and API layers'
-                ])
-                
-                with patch('sys.stdout'):  # Suppress output
-                    with patch.object(self.cli, 'get_user_confirmation', return_value=False):
-                        self.cli.run_smart_squash(args)
-                
-                # Verify the AI was called with instructions
-                mock_generate.assert_called_once()
-                prompt = mock_generate.call_args[0][0]
-                self.assertIn('Separate database and API layers', prompt)
+            try:
+                # Initialize git repo
+                subprocess.run(['git', 'init'], check=True, capture_output=True)
+                subprocess.run(['git', 'config', 'user.email', 'test@example.com'], check=True)
+                subprocess.run(['git', 'config', 'user.name', 'Test User'], check=True)
+
+                # Create initial commit
+                with open('README.md', 'w') as f:
+                    f.write('# Test\n')
+                subprocess.run(['git', 'add', '.'], check=True)
+                subprocess.run(['git', 'commit', '-m', 'Initial commit'], check=True)
+
+                # Create feature branch with changes
+                subprocess.run(['git', 'checkout', '-b', 'feature'], check=True)
+
+                with open('api.py', 'w') as f:
+                    f.write('def get_data():\n    return []\n')
+                with open('db.py', 'w') as f:
+                    f.write('def connect():\n    pass\n')
+
+                subprocess.run(['git', 'add', '.'], check=True)
+                subprocess.run(['git', 'commit', '-m', 'WIP'], check=True)
+
+                # Mock the AI response
+                with patch('git_smart_squash.ai.providers.simple_unified.UnifiedAIProvider.generate') as mock_generate:
+                    mock_generate.return_value = json.dumps([{
+                        'message': 'feat: add database layer',
+                        'hunk_ids': ['db.py:1-2'],
+                        'rationale': 'Following instruction to separate layers'
+                    }, {
+                        'message': 'feat: add API layer',
+                        'hunk_ids': ['api.py:1-2'],
+                        'rationale': 'Following instruction to separate layers'
+                    }])
+
+                    # Run with custom instructions
+                    parser = self.cli.create_parser()
+                    args = parser.parse_args([
+                        '--instructions', 'Separate database and API layers'
+                    ])
+
+                    with patch('sys.stdout'):  # Suppress output
+                        with patch.object(self.cli, 'get_user_confirmation', return_value=False):
+                            self.cli.run_smart_squash(args)
+
+                    # Verify the AI was called with instructions
+                    mock_generate.assert_called_once()
+                    prompt = mock_generate.call_args[0][0]
+                    self.assertIn('Separate database and API layers', prompt)
+            finally:
+                os.chdir(original_cwd)
 
 
 class TestInstructionsEdgeCases(unittest.TestCase):
