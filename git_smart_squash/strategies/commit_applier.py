@@ -2,6 +2,7 @@
 
 import subprocess
 import os
+import sys
 from typing import Any, Dict, List
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -68,7 +69,13 @@ class _NoopProgress:
 
 def _get_progress(console):
     """Return a Progress-like context. Use noop under pytest for stable capture."""
+    # Disable live progress when running under pytest or when stdout isn't a TTY
     if os.environ.get("PYTEST_CURRENT_TEST"):
+        return _NoopProgress()
+    try:
+        if not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty()):
+            return _NoopProgress()
+    except Exception:
         return _NoopProgress()
     return Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console)
 
