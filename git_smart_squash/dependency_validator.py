@@ -139,3 +139,57 @@ class DependencyValidator:
                     errors.append(f"Circular dependency detected: {cycle_str}")
         
         return errors
+
+    def suggest_fixes(self, result: ValidationResult, commits: List[dict]) -> List[str]:
+        """Suggest simple remediation steps for invalid commit plans.
+
+        Currently focuses on dependency violations by proposing either
+        merging offending commits or reordering them so dependencies come first.
+
+        Args:
+            result: ValidationResult from validate_commit_plan
+            commits: Original list of commit dicts with 'hunk_ids'
+
+        Returns:
+            List of human-readable suggestion strings.
+        """
+        suggestions: List[str] = []
+
+        if result is None or result.is_valid:
+            return suggestions
+
+        # Parse commit numbers from our error messages to propose merges/order changes.
+        # Example error produced in validate_commit_plan:
+        # "Hunk h1 in commit #1 depends on h2 which is in later commit #2 ..."
+        import re
+
+        merge_pairs = set()
+        reorder_pairs = set()
+
+        for err in result.errors:
+            m = re.search(r"commit\s+#(\d+).*later commit\s+#(\d+)", err)
+            if m:
+                a, b = int(m.group(1)), int(m.group(2))
+                # Normalize smaller first for stable suggestions
+                merge_pairs.add(tuple(sorted((a, b))))
+                reorder_pairs.add((b, a))  # Move dependency (b) before (a)
+
+        if merge_pairs:
+            merged = ", ".join(f"#{x} + #{y}" for x, y in sorted(merge_pairs))
+            suggestions.append(
+                f"Consider merging commits {merged} so dependent hunks land together."
+            )
+
+        if reorder_pairs:
+            reorder_str = ", ".join(f"#{src} -> #{dst}" for src, dst in sorted(reorder_pairs))
+            suggestions.append(
+                f"Alternatively, reorder commits so dependencies come first: {reorder_str}."
+            )
+
+        # Generic fallback if we couldn't parse specifics
+        if not suggestions and result.errors:
+            suggestions.append(
+                "Review hunk dependencies and either merge related commits or ensure dependent hunks appear in earlier commits."
+            )
+
+        return suggestions
