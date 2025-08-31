@@ -764,6 +764,7 @@ def test_authenticate_failure():
                         self.fail(f"{provider_name} AI analysis failed: {e}")
 
 
+@unittest.skipUnless(RUN_AI_REAL, "Set RUN_AI_REAL=1 to run real provider tests")
 class TestStructuredOutputValidation(unittest.TestCase):
     """Test structured output validation with real API responses"""
 
