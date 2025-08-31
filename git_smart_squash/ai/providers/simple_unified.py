@@ -19,9 +19,10 @@ class UnifiedAIProvider:
         'anthropic': 200000   # Anthropic hard maximum (200k tokens)
     }
     
+    
     # Conservative defaults
     DEFAULT_MAX_CONTEXT_TOKENS = 32000
-    MAX_PREDICT_TOKENS = 200000  # Increased for GPT-5 models
+    MAX_PREDICT_TOKENS = 64000  # Default max output tokens
     
     # Schema for commit organization JSON structure  
     COMMIT_SCHEMA = {
@@ -389,7 +390,8 @@ class UnifiedAIProvider:
                 max_tokens=self.config.ai.max_predict_tokens,
                 tools=tools,
                 tool_choice={"type": "tool", "name": "commit_organizer"},
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
+                timeout=120.0  # Add explicit timeout
             )
             
             # Extract structured data from tool use

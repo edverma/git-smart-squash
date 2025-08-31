@@ -14,7 +14,7 @@ class AIConfig:
     api_key_env: Optional[str] = None
     instructions: Optional[str] = None
     reasoning: str = "low"  # Reasoning effort level for GPT-5 models (default: low)
-    max_predict_tokens: int = 200000  # Maximum tokens for completion/output (default: 200k)
+    max_predict_tokens: int = 64000  # Maximum tokens for completion/output (default: 64k)
 
 
 @dataclass
@@ -96,7 +96,7 @@ class ConfigManager:
             api_key_env=config_data.get('ai', {}).get('api_key_env'),
             instructions=config_data.get('ai', {}).get('instructions'),
             reasoning=config_data.get('ai', {}).get('reasoning', 'low'),
-            max_predict_tokens=config_data.get('ai', {}).get('max_predict_tokens', 200000)
+            max_predict_tokens=config_data.get('ai', {}).get('max_predict_tokens', 64000)
         )
 
         # Load hunk configuration
