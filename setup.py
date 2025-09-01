@@ -22,7 +22,7 @@ requirements = [
     "openai>=1.0.0",
     "anthropic>=0.3.0",
     "tiktoken>=0.5.0",
-    "google-generativeai>=0.8.5",
+    "google-genai>=0.0.1",  # New Google AI SDK for Gemini support
 ]
 
 
@@ -78,6 +78,7 @@ setup(
     entry_points={
         "console_scripts": [
             "git-smart-squash=git_smart_squash.cli:main",
+            "gss=git_smart_squash.cli:main",  # Short alias
         ],
     },
     cmdclass={
