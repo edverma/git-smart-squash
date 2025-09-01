@@ -480,10 +480,13 @@ class UnifiedAIProvider:
             if params["prompt_tokens"] > model_context_limit * 0.8:
                 logger.warning(f"Large prompt ({params['prompt_tokens']} tokens) approaching {self.config.ai.model} context limit.")
             
-            # Map reasoning effort to thinking budget for Gemini models
-            # Based on OpenAI compatibility mapping: low=1024, medium=8192, high=24576
+            # Map reasoning effort to thinking budget for Gemini models that support it
+            # Only specific models support thinking (gemini-2.0-flash-thinking-exp, etc.)
             thinking_budget = None
-            if self.config.ai.reasoning:
+            model_lower = self.config.ai.model.lower()
+            supports_thinking = "thinking" in model_lower or "2.5" in model_lower
+            
+            if self.config.ai.reasoning and supports_thinking:
                 reasoning_map = {
                     "minimal": 0,       # Disable thinking for minimal (if supported)
                     "low": 1024,        # Low thinking budget
@@ -491,30 +494,28 @@ class UnifiedAIProvider:
                     "high": 24576       # High thinking budget
                 }
                 thinking_budget = reasoning_map.get(self.config.ai.reasoning, 8192)
-                # For Gemini 2.5 Pro, thinking cannot be disabled (minimal will use low)
-                if thinking_budget == 0 and "pro" in self.config.ai.model.lower():
+                # For models that require thinking, minimal will use low
+                if thinking_budget == 0 and supports_thinking:
                     thinking_budget = 1024
-                    logger.debug(f"Gemini 2.5 Pro does not support disabling thinking, using low budget instead")
+                    logger.debug(f"Model {self.config.ai.model} requires thinking, using low budget instead of disabling")
                 logger.debug(f"Using Gemini thinking budget={thinking_budget} for reasoning={self.config.ai.reasoning}")
             
             # Create client
             client = genai.Client(api_key=api_key)
             
-            # Build config with thinking budget and JSON output
+            # Build config with JSON output
             config_params = {
-                "response_config": types.GenerateContentConfig.ResponseConfig(
-                    max_output_tokens=self.config.ai.max_predict_tokens,
-                    temperature=0.1,  # Lower temperature for more structured output
-                    top_p=0.95,       # Higher top_p for better instruction following
-                    top_k=20,         # Lower top_k for more focused responses
-                    response_mime_type="application/json",  # Force JSON output
-                    response_schema=self.GEMINI_SCHEMA  # Use Gemini-compatible schema
-                )
+                "maxOutputTokens": self.config.ai.max_predict_tokens,
+                "temperature": 0.1,  # Lower temperature for more structured output
+                "topP": 0.95,       # Higher top_p for better instruction following
+                "topK": 20,         # Lower top_k for more focused responses
+                "responseMimeType": "application/json",  # Force JSON output
+                "responseSchema": self.GEMINI_SCHEMA  # Use Gemini-compatible schema
             }
             
-            # Add thinking config if specified
-            if thinking_budget is not None:
-                config_params["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+            # Add thinking config only for models that support it
+            if thinking_budget is not None and supports_thinking:
+                config_params["thinkingConfig"] = types.ThinkingConfig(thinkingBudget=thinking_budget)
             
             config = types.GenerateContentConfig(**config_params)
             
@@ -542,6 +543,6 @@ class UnifiedAIProvider:
                 return response_text  # Return as-is if not JSON
             
         except ImportError:
-            raise Exception("Google Generative AI library not installed. Run: pip install google-generativeai")
+            raise Exception("Google Generative AI library not installed. Run: pip install google-genai")
         except Exception as e:
             raise Exception(f"Google Gemini generation failed: {e}")
