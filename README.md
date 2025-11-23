@@ -1,3 +1,34 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="right">
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=en">English</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=zh-CN">简体中文</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=zh-TW">繁體中文</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=ja">日本語</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=ko">한국어</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=hi">हिन्दी</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=th">ไทย</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=fr">Français</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=de">Deutsch</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=es">Español</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=it">Itapano</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=ru">Русский</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=pt">Português</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=nl">Nederlands</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=pl">Polski</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=ar">العربية</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=fa">فارسی</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=tr">Türkçe</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=vi">Tiếng Việt</a></p>
+        <p><a href="https://openaitx.github.io/view.html?user=edverma&project=git-smart-squash&lang=id">Bahasa Indonesia</a></p>
+      </div>
+    </div>
+  </details>
+</div>
+
 # Git Smart Squash
 
 Stop wasting time manually reorganizing commits. Let AI do it for you.
